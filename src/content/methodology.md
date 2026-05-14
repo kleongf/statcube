@@ -76,6 +76,11 @@ $$
 Like Statbotics's implementation, the k-factor is a kinda linearly interpolated piecewise function that reminds me about the graph for the market for ample reserves.
 
 $$
+k(n) = \begin{cases} 
+      {k}_{max}  & n \leq 6 \\
+      {k}_{max}  - (n - 6) \cdot \frac{({k}_{max}  - {k}_{min} )}{6}  & 7 \leq n \leq 12 \\
+      {k}_{min} & n \gt 12
+   \end{cases}
 $$
 
 There are a few flaws with this assumption: for example, it assumes that the mean score is significantly different than 0. In the future, a new heuristic may be implemented that hopefully incorporates standard deviation of matches instead (or some linear combination of both!). I was just lazy and wanted an easy solution, but this will probably be updated in the future as I process more data.
