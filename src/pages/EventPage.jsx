@@ -7,7 +7,6 @@ import { supabase } from '../lib/supabase'
 const SEASON = 2025
 const A_PARAM = 2.1482
 const P_PARAM = 0.6543
-const STATION_ORDER = { One: 0, Two: 1 }
 const MEAN_TEAM_EPA = 113.30 / 2
 
 const EVENT_QUERY = `
@@ -22,8 +21,8 @@ const EVENT_QUERY = `
         scheduledStartTime
         postResultTime
         teams {
-          team { number }
-          station
+          teamNumber
+          onField
           alliance
         }
         scores {
@@ -83,9 +82,8 @@ function calcRedWinProb(r1, r2, b1, b2) {
 function getMatchPredictions(matchTeams, postResultTime, epaLookups) {
   if (Object.keys(epaLookups).length === 0) return null
   const resultMs = postResultTime ? new Date(postResultTime).getTime() : null
-  const byStation = (a, b) => (STATION_ORDER[a.station] ?? 0) - (STATION_ORDER[b.station] ?? 0)
-  const red = matchTeams.filter((t) => t.alliance === 'Red').sort(byStation)
-  const blue = matchTeams.filter((t) => t.alliance === 'Blue').sort(byStation)
+  const red = matchTeams.filter((t) => t.alliance === 'Red' && t.onField)
+  const blue = matchTeams.filter((t) => t.alliance === 'Blue' && t.onField)
 
   const getEpa = (num) => {
     const entries = epaLookups[num]
@@ -94,10 +92,10 @@ function getMatchPredictions(matchTeams, postResultTime, epaLookups) {
     return getEpaBeforeTime(entries, resultMs) ?? MEAN_TEAM_EPA
   }
 
-  const r1 = getEpa(red[0]?.team.number)
-  const r2 = getEpa(red[1]?.team.number)
-  const b1 = getEpa(blue[0]?.team.number)
-  const b2 = getEpa(blue[1]?.team.number)
+  const r1 = getEpa(red[0]?.teamNumber)
+  const r2 = getEpa(red[1]?.teamNumber)
+  const b1 = getEpa(blue[0]?.teamNumber)
+  const b2 = getEpa(blue[1]?.teamNumber)
 
   return { winProb: calcRedWinProb(r1, r2, b1, b2), redPred: r1 + r2, bluePred: b1 + b2 }
 }
@@ -145,18 +143,21 @@ function TabButton({ label, count, active, onClick }) {
 function AllianceTeams({ teams, alliance }) {
   const side = teams
     .filter((t) => t.alliance === alliance)
-    .sort((a, b) => (STATION_ORDER[a.station] ?? 0) - (STATION_ORDER[b.station] ?? 0))
+    .sort((a, b) => (b.onField ? 1 : 0) - (a.onField ? 1 : 0))
   const isRed = alliance === 'Red'
   return (
     <div className="flex gap-1.5 flex-wrap">
       {side.map((t) => (
         <span
-          key={t.team.number}
-          className={`px-2 py-0.5 rounded text-xs font-medium tabular-nums ${
-            isRed ? 'bg-red-950 text-red-300' : 'bg-blue-950 text-blue-300'
-          }`}
+          key={t.teamNumber}
+          className={[
+            'px-2 py-0.5 rounded text-xs font-medium tabular-nums',
+            !t.onField ? 'opacity-40' : '',
+            isRed ? 'bg-red-950 text-red-300' : 'bg-blue-950 text-blue-300',
+          ].join(' ')}
+          title={!t.onField ? 'Surrogate (not on field)' : undefined}
         >
-          {t.team.number}
+          {t.teamNumber}
         </span>
       ))}
     </div>
@@ -345,7 +346,7 @@ export default function EventPage() {
     async function fetchTeamData() {
       const numbers = new Set()
       event.teams.forEach(({ team }) => numbers.add(team.number))
-      event.matches.forEach((m) => m.teams.forEach((t) => numbers.add(t.team.number)))
+      event.matches.forEach((m) => m.teams.forEach((t) => numbers.add(t.teamNumber)))
 
       const { data, error } = await supabase
         .from('epa_snapshots')
