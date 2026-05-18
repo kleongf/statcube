@@ -599,7 +599,7 @@ function StatCard({ label, value, color, rank, totalTeams }) {
         <p className="text-gray-600 text-xs mt-1 tabular-nums">
           Rank #{rank}
           {percentile != null && (
-            <span className="ml-1.5 text-gray-500">· {percentile.toFixed(2)}th percentile</span>
+            <span className="ml-1.5 text-gray-500">· {percentile.toFixed(2)}%</span>
           )}
         </p>
       )}
