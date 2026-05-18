@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import SeasonSelect from '../components/SeasonSelect'
+import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -8,40 +10,38 @@ import { supabase } from '../lib/supabase'
 import { ftcscoutQuery } from '../lib/ftcscout'
 import Navbar from '../components/Navbar'
 
-const SEASON = 2025
-const A_PARAM = 2.1482
-const P_PARAM = 0.6543
-const MEAN_TEAM_EPA = 113.30 / 2  // fallback when no pre-match EPA entry exists
 
-const MATCHES_QUERY = `
-  query TeamMatches($number: Int!, $season: Int!) {
-    teamByNumber(number: $number) {
-      events(season: $season) {
-        matches {
-          alliance
-          eventCode
-          match {
-            teams {
-              teamNumber
-              alliance
-              onField
-            }
-            matchNum
-            scheduledStartTime
-            postResultTime
-            hasBeenPlayed
-            scores {
-              ... on MatchScores2025 {
-                red { totalPoints autoPoints }
-                blue { totalPoints autoPoints }
+function getMatchesQuery(season) {
+  return `
+    query TeamMatches($number: Int!, $season: Int!) {
+      teamByNumber(number: $number) {
+        events(season: $season) {
+          matches {
+            alliance
+            eventCode
+            match {
+              teams {
+                teamNumber
+                alliance
+                onField
+              }
+              matchNum
+              scheduledStartTime
+              postResultTime
+              hasBeenPlayed
+              scores {
+                ... on MatchScores${season} {
+                  red { totalPoints autoPoints }
+                  blue { totalPoints autoPoints }
+                }
               }
             }
           }
         }
       }
     }
-  }
-`
+  `
+}
 
 // ── Math ─────────────────────────────────────────────────────────────────────
 
@@ -78,16 +78,16 @@ function getEpaBeforeTime(sortedEntries, matchMs) {
   return result
 }
 
-function calcRedWinProb(r1, r2, b1, b2) {
+function calcRedWinProb(r1, r2, b1, b2, params) {
   const red = (r1 ?? 0) + (r2 ?? 0)
   const blue = (b1 ?? 0) + (b2 ?? 0)
-  const redStd = A_PARAM * Math.pow(Math.max(1, red), P_PARAM)
-  const blueStd = A_PARAM * Math.pow(Math.max(1, blue), P_PARAM)
+  const redStd = params.a * Math.pow(Math.max(1, red), params.p)
+  const blueStd = params.a * Math.pow(Math.max(1, blue), params.p)
   const z = (0 - (red - blue)) / Math.sqrt(redStd ** 2 + blueStd ** 2)
-  return 1-normalCDF(z)
+  return 1 - normalCDF(z)
 }
 
-function getMatchPredictions(matchTeams, postResultTime, teamEpas) {
+function getMatchPredictions(matchTeams, postResultTime, teamEpas, params) {
   if (Object.keys(teamEpas).length === 0) return null
   const resultMs = postResultTime ? new Date(postResultTime).getTime() : null
   const red = matchTeams.filter((t) => t.alliance === 'Red' && t.onField)
@@ -95,9 +95,9 @@ function getMatchPredictions(matchTeams, postResultTime, teamEpas) {
 
   const getEpa = (num) => {
     const entries = teamEpas[num]
-    if (!entries || entries.length === 0) return MEAN_TEAM_EPA
+    if (!entries || entries.length === 0) return params.mean
     if (resultMs == null) return entries[entries.length - 1].value
-    return getEpaBeforeTime(entries, resultMs) ?? MEAN_TEAM_EPA
+    return getEpaBeforeTime(entries, resultMs) ?? params.mean
   }
 
   const r1 = getEpa(red[0]?.teamNumber)
@@ -106,7 +106,7 @@ function getMatchPredictions(matchTeams, postResultTime, teamEpas) {
   const b2 = getEpa(blue[1]?.teamNumber)
 
   return {
-    winProb: calcRedWinProb(r1, r2, b1, b2),
+    winProb: calcRedWinProb(r1, r2, b1, b2, params),
     redPred: r1 + r2,
     bluePred: b1 + b2,
   }
@@ -286,7 +286,7 @@ function PredCell({ winProb, redPred, bluePred, teamAlliance }) {
   )
 }
 
-function EventMatchTable({ eventCode, matches, teamNumber, teamEpas }) {
+function EventMatchTable({ eventCode, matches, teamNumber, teamEpas, params }) {
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 flex items-center gap-3">
@@ -310,6 +310,7 @@ function EventMatchTable({ eventCode, matches, teamNumber, teamEpas }) {
               m.match.teams,
               m.match.postResultTime,
               teamEpas,
+              params,
             )
             return (
               <tr
@@ -357,7 +358,8 @@ function EventMatchTable({ eventCode, matches, teamNumber, teamEpas }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function TeamPage() {
-  const { teamNumber } = useParams()
+  const { teamNumber, season: seasonParam } = useParams()
+  const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
   const navigate = useNavigate()
   const teamNum = parseInt(teamNumber, 10)
 
@@ -376,7 +378,7 @@ export default function TeamPage() {
   useEffect(() => {
     async function fetchTeam() {
       const { data, error } = await supabase
-        .from('epa_snapshots')
+        .from(`epa_${season}`)
         .select('*')
         .eq('team_number', teamNumber)
         .single()
@@ -385,15 +387,15 @@ export default function TeamPage() {
       setLoading(false)
     }
     fetchTeam()
-  }, [teamNumber])
+  }, [teamNumber, season])
 
   useEffect(() => {
     if (!team) return
     async function fetchRanks() {
       const [epaRes, autoRes, telepRes] = await Promise.all([
-        supabase.from('epa_snapshots').select('*', { count: 'exact', head: true }).gt('current_epa', team.current_epa),
-        supabase.from('epa_snapshots').select('*', { count: 'exact', head: true }).gt('current_auto_epa', team.current_auto_epa),
-        supabase.from('epa_snapshots').select('*', { count: 'exact', head: true }).gt('current_teleop_epa', team.current_teleop_epa),
+        supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }).gt('current_epa', team.current_epa),
+        supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }).gt('current_auto_epa', team.current_auto_epa),
+        supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }).gt('current_teleop_epa', team.current_teleop_epa),
       ])
       setRanks({
         epa: (epaRes.count ?? 0) + 1,
@@ -402,12 +404,12 @@ export default function TeamPage() {
       })
     }
     fetchRanks()
-  }, [team])
+  }, [team, season])
 
   useEffect(() => {
     async function fetchMatches() {
       try {
-        const data = await ftcscoutQuery(MATCHES_QUERY, { number: teamNum, season: SEASON })
+        const data = await ftcscoutQuery(getMatchesQuery(season), { number: teamNum, season })
         const events = data?.teamByNumber?.events ?? []
         setMatchEvents(groupMatchesByEvent(events))
       } catch (e) {
@@ -416,7 +418,7 @@ export default function TeamPage() {
       setMatchesLoading(false)
     }
     fetchMatches()
-  }, [teamNum])
+  }, [teamNum, season])
 
   // Once match events are loaded, fetch EPA history for every team that appears
   useEffect(() => {
@@ -431,7 +433,7 @@ export default function TeamPage() {
       }
 
       const { data, error } = await supabase
-        .from('epa_snapshots')
+        .from(`epa_${season}`)
         .select('team_number, epa')
         .in('team_number', [...teamNumbers])
 
@@ -456,12 +458,15 @@ export default function TeamPage() {
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <Navbar />
       <div className="max-w-5xl mx-auto p-6">
-        <button
-          onClick={() => navigate('/')}
-          className="text-gray-400 hover:text-white text-sm mb-6 flex items-center gap-1.5 transition-colors"
-        >
-          ← All Teams
-        </button>
+        <div className="flex items-center justify-between mb-6">
+          <button
+            onClick={() => navigate(`/teams/${season}`)}
+            className="text-gray-400 hover:text-white text-sm flex items-center gap-1.5 transition-colors"
+          >
+            ← All Teams
+          </button>
+          <SeasonSelect season={season} getPath={(s) => `/team/${teamNumber}/${s}`} />
+        </div>
 
         {error && (
           <div className="bg-red-900/40 border border-red-700 rounded-lg p-4 text-red-300 mb-4">
@@ -535,7 +540,7 @@ export default function TeamPage() {
               <h2 className="text-lg font-semibold text-white mb-4">
                 Match History
                 <span className="text-gray-500 text-sm font-normal ml-2">
-                  {SEASON}/{SEASON + 1} season
+                  {season}/{season + 1} season
                 </span>
               </h2>
 
@@ -564,6 +569,7 @@ export default function TeamPage() {
                       matches={matches}
                       teamNumber={teamNum}
                       teamEpas={teamEpas}
+                      params={SEASON_PARAMS[season] ?? SEASON_PARAMS[2025]}
                     />
                   ))}
                 </div>

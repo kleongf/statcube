@@ -1,43 +1,56 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { ftcscoutQuery } from '../lib/ftcscout'
 import { supabase } from '../lib/supabase'
+import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
+import SortableTeamsTable from '../components/SortableTeamsTable'
 
-const SEASON = 2025
-const A_PARAM = 2.1482
-const P_PARAM = 0.6543
-const MEAN_TEAM_EPA = 113.30 / 2
 
-const EVENT_QUERY = `
-  query EventByCode($season: Int!, $code: String!) {
-    eventByCode(season: $season, code: $code) {
-      location { city country state }
-      start
-      end
-      code
-      matches {
-        matchNum
-        scheduledStartTime
-        postResultTime
+function getEventQuery(season) {
+  return `
+    query EventByCode($season: Int!, $code: String!) {
+      eventByCode(season: $season, code: $code) {
+        location { city country state }
+        start
+        end
+        code
+        matches {
+          matchNum
+          scheduledStartTime
+          postResultTime
+          teams {
+            teamNumber
+            onField
+            alliance
+          }
+          scores {
+            ... on MatchScores${season} {
+              red { totalPoints }
+              blue { totalPoints }
+            }
+          }
+        }
         teams {
           teamNumber
-          onField
-          alliance
-        }
-        scores {
-          ... on MatchScores2025 {
-            red { totalPoints }
-            blue { totalPoints }
+          team { name number }
+          stats {
+            ... on TeamEventStats${season} {
+              qualMatchesPlayed
+              rank
+              rp
+              tb1
+              tb2
+              wins
+              losses
+              ties
+            }
           }
         }
       }
-      teams {
-        team { name number }
-      }
     }
-  }
-`
+  `
+}
 
 // ── Math ─────────────────────────────────────────────────────────────────────
 
@@ -70,16 +83,16 @@ function getEpaBeforeTime(entries, matchMs) {
   return result
 }
 
-function calcRedWinProb(r1, r2, b1, b2) {
+function calcRedWinProb(r1, r2, b1, b2, params) {
   const red = (r1 ?? 0) + (r2 ?? 0)
   const blue = (b1 ?? 0) + (b2 ?? 0)
-  const redStd = A_PARAM * Math.pow(Math.max(1, red), P_PARAM)
-  const blueStd = A_PARAM * Math.pow(Math.max(1, blue), P_PARAM)
+  const redStd = params.a * Math.pow(Math.max(1, red), params.p)
+  const blueStd = params.a * Math.pow(Math.max(1, blue), params.p)
   const z = (0 - (red - blue)) / Math.sqrt(redStd ** 2 + blueStd ** 2)
   return 1 - normalCDF(z)
 }
 
-function getMatchPredictions(matchTeams, postResultTime, epaLookups) {
+function getMatchPredictions(matchTeams, postResultTime, epaLookups, params) {
   if (Object.keys(epaLookups).length === 0) return null
   const resultMs = postResultTime ? new Date(postResultTime).getTime() : null
   const red = matchTeams.filter((t) => t.alliance === 'Red' && t.onField)
@@ -87,9 +100,9 @@ function getMatchPredictions(matchTeams, postResultTime, epaLookups) {
 
   const getEpa = (num) => {
     const entries = epaLookups[num]
-    if (!entries || entries.length === 0) return MEAN_TEAM_EPA
+    if (!entries || entries.length === 0) return params.mean
     if (resultMs == null) return entries[entries.length - 1].value
-    return getEpaBeforeTime(entries, resultMs) ?? MEAN_TEAM_EPA
+    return getEpaBeforeTime(entries, resultMs) ?? params.mean
   }
 
   const r1 = getEpa(red[0]?.teamNumber)
@@ -97,7 +110,7 @@ function getMatchPredictions(matchTeams, postResultTime, epaLookups) {
   const b1 = getEpa(blue[0]?.teamNumber)
   const b2 = getEpa(blue[1]?.teamNumber)
 
-  return { winProb: calcRedWinProb(r1, r2, b1, b2), redPred: r1 + r2, bluePred: b1 + b2 }
+  return { winProb: calcRedWinProb(r1, r2, b1, b2, params), redPred: r1 + r2, bluePred: b1 + b2 }
 }
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -207,53 +220,35 @@ function PredCell({ winProb, redPred, bluePred }) {
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
-function TeamsTab({ teams, supabaseData, navigate }) {
-  const merged = teams
-    .map(({ team }) => ({ number: team.number, name: team.name, ...(supabaseData[team.number] ?? {}) }))
-    .sort((a, b) => (b.current_epa ?? -Infinity) - (a.current_epa ?? -Infinity))
+function TeamsTab({ teams, supabaseData, season }) {
+  const [sortKey, setSortKey] = useState('current_epa')
+  const [sortDir, setSortDir] = useState('desc')
+
+  const sorted = useMemo(() => {
+    const merged = teams.map(({ team }) => ({
+      team_number: team.number,
+      team_name: team.name,
+      ...(supabaseData[team.number] ?? {}),
+    }))
+    return merged.sort((a, b) => {
+      const av = a[sortKey] ?? -Infinity
+      const bv = b[sortKey] ?? -Infinity
+      return sortDir === 'asc' ? av - bv : bv - av
+    })
+  }, [teams, supabaseData, sortKey, sortDir])
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-xs uppercase tracking-wider text-gray-500 border-b border-gray-800">
-            <th className="text-left px-5 py-3 w-8">#</th>
-            <th className="text-left px-5 py-3">Team</th>
-            <th className="text-right px-5 py-3">Total EPA</th>
-            <th className="text-right px-5 py-3">Auto EPA</th>
-            <th className="text-right px-5 py-3">Teleop EPA</th>
-          </tr>
-        </thead>
-        <tbody>
-          {merged.map((team, i) => (
-            <tr
-              key={team.number}
-              onClick={() => navigate(`/team/${team.number}`)}
-              className="border-b border-gray-800/60 last:border-0 hover:bg-gray-800/50 cursor-pointer transition-colors"
-            >
-              <td className="px-5 py-3.5 text-gray-500 tabular-nums">{i + 1}</td>
-              <td className="px-5 py-3.5">
-                <span className="font-medium text-white">{team.number}</span>
-                <span className="text-gray-400 ml-2">{team.name}</span>
-              </td>
-              <td className="px-5 py-3.5 text-right tabular-nums font-medium text-blue-300">
-                {team.current_epa?.toFixed(2) ?? '—'}
-              </td>
-              <td className="px-5 py-3.5 text-right tabular-nums text-gray-400">
-                {team.current_auto_epa?.toFixed(2) ?? '—'}
-              </td>
-              <td className="px-5 py-3.5 text-right tabular-nums text-gray-400">
-                {team.current_teleop_epa?.toFixed(2) ?? '—'}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <SortableTeamsTable
+      teams={sorted}
+      season={season}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSortChange={(key, dir) => { setSortKey(key); setSortDir(dir) }}
+    />
   )
 }
 
-function MatchesTab({ matches, epaLookups }) {
+function MatchesTab({ matches, epaLookups, params }) {
   const sorted = [...matches].sort(
     (a, b) => new Date(a.scheduledStartTime) - new Date(b.scheduledStartTime),
   )
@@ -273,7 +268,7 @@ function MatchesTab({ matches, epaLookups }) {
         </thead>
         <tbody>
           {sorted.map((m, i) => {
-            const preds = getMatchPredictions(m.teams, m.postResultTime, epaLookups)
+            const preds = getMatchPredictions(m.teams, m.postResultTime, epaLookups, params)
             return (
               <tr
                 key={i}
@@ -308,10 +303,123 @@ function MatchesTab({ matches, epaLookups }) {
   )
 }
 
+const RANKINGS_COLS = [
+  { key: 'rank',  label: 'Rank', sortable: true,  align: 'left',   className: 'w-16' },
+  { key: null,    label: 'Team', sortable: false,  align: 'left'   },
+  { key: null,    label: 'Record', sortable: false, align: 'center' },
+  { key: 'rp',   label: 'RP',   sortable: true,  align: 'right'  },
+  { key: 'tb1',  label: 'TB1',  sortable: true,  align: 'right'  },
+  { key: 'tb2',  label: 'TB2',  sortable: true,  align: 'right'  },
+]
+
+function RankSortIcon({ active, direction }) {
+  if (!active) return <span className="ml-1 text-gray-600 select-none">↕</span>
+  return <span className="ml-1 text-blue-400 select-none">{direction === 'asc' ? '↑' : '↓'}</span>
+}
+
+function RankingsTab({ teams }) {
+  const [sortKey, setSortKey] = useState('rank')
+  const [sortDir, setSortDir] = useState('asc')
+
+  const rows = useMemo(() => {
+    const mapped = teams
+      .filter((t) => t.stats)
+      .map((t) => ({
+        teamNumber: t.teamNumber,
+        teamName: t.team?.name ?? '',
+        rank: t.stats.rank,
+        rp: t.stats.rp,
+        tb1: t.stats.tb1,
+        tb2: t.stats.tb2,
+        wins: t.stats.wins,
+        losses: t.stats.losses,
+        ties: t.stats.ties,
+      }))
+    return [...mapped].sort((a, b) => {
+      const av = a[sortKey] ?? (sortDir === 'asc' ? Infinity : -Infinity)
+      const bv = b[sortKey] ?? (sortDir === 'asc' ? Infinity : -Infinity)
+      return sortDir === 'asc' ? av - bv : bv - av
+    })
+  }, [teams, sortKey, sortDir])
+
+  function handleHeaderClick(key) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir(key === 'rank' ? 'asc' : 'desc')
+    }
+  }
+
+  return (
+    <div className="bg-gray-900 rounded-xl overflow-hidden border border-gray-800">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-800 text-gray-400 text-xs uppercase tracking-wider">
+            {RANKINGS_COLS.map((col) => (
+              <th
+                key={col.label}
+                onClick={col.sortable ? () => handleHeaderClick(col.key) : undefined}
+                className={[
+                  col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left',
+                  'px-5 py-3 select-none',
+                  col.sortable ? 'cursor-pointer hover:text-white transition-colors' : '',
+                  col.sortable && sortKey === col.key ? 'text-blue-400' : '',
+                  col.className ?? '',
+                ].join(' ')}
+              >
+                {col.label}
+                {col.sortable && <RankSortIcon active={sortKey === col.key} direction={sortDir} />}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={6} className="px-5 py-10 text-center text-gray-500">No ranking data available.</td>
+            </tr>
+          ) : (
+            rows.map((row) => (
+              <tr
+                key={row.teamNumber}
+                className="border-b border-gray-800/60 last:border-0 hover:bg-gray-800/30 transition-colors"
+              >
+                <td className="px-5 py-3.5 tabular-nums font-medium text-gray-300">{row.rank ?? '—'}</td>
+                <td className="px-5 py-3.5">
+                  <span className="font-medium text-white">{row.teamNumber}</span>
+                  <span className="text-gray-400 ml-2">{row.teamName}</span>
+                </td>
+                <td className="px-5 py-3.5 text-center tabular-nums">
+                  <span className="text-emerald-400">{row.wins}</span>
+                  <span className="text-gray-600 mx-0.5">-</span>
+                  <span className="text-red-400">{row.losses}</span>
+                  <span className="text-gray-600 mx-0.5">-</span>
+                  <span className="text-yellow-400">{row.ties}</span>
+                </td>
+                <td className={`px-5 py-3.5 text-right tabular-nums font-medium ${sortKey === 'rp' ? 'text-blue-300' : 'text-gray-200'}`}>
+                  {row.rp?.toFixed(2) ?? '—'}
+                </td>
+                <td className={`px-5 py-3.5 text-right tabular-nums ${sortKey === 'tb1' ? 'text-blue-300 font-medium' : 'text-gray-400'}`}>
+                  {row.tb1?.toFixed(1) ?? '—'}
+                </td>
+                <td className={`px-5 py-3.5 text-right tabular-nums ${sortKey === 'tb2' ? 'text-blue-300 font-medium' : 'text-gray-400'}`}>
+                  {row.tb2 ?? '—'}
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function EventPage() {
-  const { eventCode } = useParams()
+  const { eventCode, season: seasonParam } = useParams()
+  const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
   const navigate = useNavigate()
   const location = useLocation()
   const eventName = location.state?.name
@@ -330,7 +438,7 @@ export default function EventPage() {
   useEffect(() => {
     async function fetchEvent() {
       try {
-        const data = await ftcscoutQuery(EVENT_QUERY, { season: SEASON, code: eventCode })
+        const data = await ftcscoutQuery(getEventQuery(season), { season, code: eventCode })
         setEvent(data?.eventByCode ?? null)
       } catch (e) {
         setError(e.message)
@@ -338,7 +446,7 @@ export default function EventPage() {
       setLoading(false)
     }
     fetchEvent()
-  }, [eventCode])
+  }, [eventCode, season])
 
   useEffect(() => {
     if (!event) return
@@ -349,7 +457,7 @@ export default function EventPage() {
       event.matches.forEach((m) => m.teams.forEach((t) => numbers.add(t.teamNumber)))
 
       const { data, error } = await supabase
-        .from('epa_snapshots')
+        .from(`epa_${season}`)
         .select('team_number, current_epa, current_auto_epa, current_teleop_epa, epa')
         .in('team_number', [...numbers])
 
@@ -376,7 +484,7 @@ export default function EventPage() {
       <Navbar />
       <div className="max-w-5xl mx-auto p-6">
         <button
-          onClick={() => navigate('/events')}
+          onClick={() => navigate(`/events/${season}`)}
           className="text-gray-400 hover:text-white text-sm mb-6 flex items-center gap-1.5 transition-colors"
         >
           ← All Events
@@ -425,18 +533,28 @@ export default function EventPage() {
                 active={activeTab === 'matches'}
                 onClick={() => setActiveTab('matches')}
               />
+              <TabButton
+                label="Rankings"
+                count={event.teams.filter((t) => t.stats).length || null}
+                active={activeTab === 'rankings'}
+                onClick={() => setActiveTab('rankings')}
+              />
             </div>
 
             {activeTab === 'teams' && (
               <TeamsTab
                 teams={event.teams}
                 supabaseData={supabaseData}
-                navigate={navigate}
+                season={season}
               />
             )}
 
             {activeTab === 'matches' && (
-              <MatchesTab matches={event.matches} epaLookups={epaLookups} />
+              <MatchesTab matches={event.matches} epaLookups={epaLookups} params={SEASON_PARAMS[season] ?? SEASON_PARAMS[2025]} />
+            )}
+
+            {activeTab === 'rankings' && (
+              <RankingsTab teams={event.teams} />
             )}
           </>
         )}

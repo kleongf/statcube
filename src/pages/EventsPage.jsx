@@ -1,9 +1,9 @@
 import { useEffect, useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import Navbar from '../components/Navbar'
+import SeasonSelect from '../components/SeasonSelect'
 import { ftcscoutQuery } from '../lib/ftcscout'
-
-const SEASON = 2025
+import { CURRENT_SEASON } from '../lib/constants'
 
 const EVENTS_QUERY = `
   query Events($season: Int!) {
@@ -61,6 +61,9 @@ function EventCard({ event, onClick }) {
 }
 
 export default function EventsPage() {
+  const { season: seasonParam } = useParams()
+  const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
+
   const [allEvents, setAllEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -68,9 +71,13 @@ export default function EventsPage() {
   const navigate = useNavigate()
 
   useEffect(() => {
+    setAllEvents([])
+    setLoading(true)
+    setError(null)
+
     async function fetchEvents() {
       try {
-        const data = await ftcscoutQuery(EVENTS_QUERY, { season: SEASON })
+        const data = await ftcscoutQuery(EVENTS_QUERY, { season })
         const events = data?.eventsSearch ?? []
         events.sort((a, b) => a.start.localeCompare(b.start))
         setAllEvents(events)
@@ -80,7 +87,7 @@ export default function EventsPage() {
       setLoading(false)
     }
     fetchEvents()
-  }, [])
+  }, [season])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -92,8 +99,11 @@ export default function EventsPage() {
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <Navbar />
       <div className="max-w-5xl mx-auto p-6">
-        <h1 className="text-3xl font-bold mb-1 text-white">Events</h1>
-        <p className="text-gray-400 text-sm mb-6">{SEASON}/{SEASON + 1} season</p>
+        <div className="flex items-start justify-between mb-1">
+          <h1 className="text-3xl font-bold text-white">Events</h1>
+          <SeasonSelect season={season} getPath={(s) => `/events/${s}`} />
+        </div>
+        <p className="text-gray-400 text-sm mb-6">{season}/{season + 1} season</p>
 
         <input
           type="text"
@@ -130,7 +140,7 @@ export default function EventsPage() {
                 <EventCard
                   key={event.code}
                   event={event}
-                  onClick={() => navigate(`/events/${event.code}`, { state: { name: event.name } })}
+                  onClick={() => navigate(`/event/${season}/${event.code}`, { state: { name: event.name } })}
                 />
               ))}
             </div>
