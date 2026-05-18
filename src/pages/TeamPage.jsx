@@ -374,6 +374,7 @@ export default function TeamPage() {
   // teamNumber -> sorted [{ms, value}] EPA lookup
   const [teamEpas, setTeamEpas] = useState({})
   const [ranks, setRanks] = useState(null)
+  const [totalTeams, setTotalTeams] = useState(null)
 
   useEffect(() => {
     async function fetchTeam() {
@@ -392,16 +393,18 @@ export default function TeamPage() {
   useEffect(() => {
     if (!team) return
     async function fetchRanks() {
-      const [epaRes, autoRes, telepRes] = await Promise.all([
+      const [epaRes, autoRes, telepRes, totalRes] = await Promise.all([
         supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }).gt('current_epa', team.current_epa),
         supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }).gt('current_auto_epa', team.current_auto_epa),
         supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }).gt('current_teleop_epa', team.current_teleop_epa),
+        supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }),
       ])
       setRanks({
         epa: (epaRes.count ?? 0) + 1,
         auto: (autoRes.count ?? 0) + 1,
         teleop: (telepRes.count ?? 0) + 1,
       })
+      setTotalTeams(totalRes.count ?? null)
     }
     fetchRanks()
   }, [team, season])
@@ -489,9 +492,9 @@ export default function TeamPage() {
                 <span className="text-xl text-gray-400">{team.team_name}</span>
               </div>
               <div className="grid grid-cols-3 gap-4 mt-5">
-                <StatCard label="Total EPA" value={team.current_epa} color="text-blue-400" rank={ranks?.epa} />
-                <StatCard label="Auto EPA" value={team.current_auto_epa} color="text-emerald-400" rank={ranks?.auto} />
-                <StatCard label="Teleop EPA" value={team.current_teleop_epa} color="text-violet-400" rank={ranks?.teleop} />
+                <StatCard label="Total EPA" value={team.current_epa} color="text-blue-400" rank={ranks?.epa} totalTeams={totalTeams} />
+                <StatCard label="Auto EPA" value={team.current_auto_epa} color="text-emerald-400" rank={ranks?.auto} totalTeams={totalTeams} />
+                <StatCard label="Teleop EPA" value={team.current_teleop_epa} color="text-violet-400" rank={ranks?.teleop} totalTeams={totalTeams} />
               </div>
             </div>
 
@@ -582,7 +585,10 @@ export default function TeamPage() {
   )
 }
 
-function StatCard({ label, value, color, rank }) {
+function StatCard({ label, value, color, rank, totalTeams }) {
+  const percentile = rank != null && totalTeams != null
+    ? 100 - (rank / totalTeams) * 100
+    : null
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl px-5 py-4">
       <p className="text-gray-500 text-xs uppercase tracking-wider mb-1">{label}</p>
@@ -590,7 +596,12 @@ function StatCard({ label, value, color, rank }) {
         {value != null ? value.toFixed(2) : '—'}
       </p>
       {rank != null && (
-        <p className="text-gray-600 text-xs mt-1 tabular-nums">Rank #{rank}</p>
+        <p className="text-gray-600 text-xs mt-1 tabular-nums">
+          Rank #{rank}
+          {percentile != null && (
+            <span className="ml-1.5 text-gray-500">· {percentile.toFixed(2)}th percentile</span>
+          )}
+        </p>
       )}
     </div>
   )

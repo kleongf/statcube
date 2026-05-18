@@ -5,6 +5,7 @@ import TeamsPage from './pages/TeamsPage'
 import TeamPage from './pages/TeamPage'
 import EventsPage from './pages/EventsPage'
 import EventPage from './pages/EventPage'
+import ComparePage from './pages/ComparePage'
 import MethodologyPage from './pages/MethodologyPage'
 
 export default function App() {
@@ -19,6 +20,8 @@ export default function App() {
         <Route path="/events" element={<Navigate to={`/events/${CURRENT_SEASON}`} replace />} />
         <Route path="/events/:season" element={<EventsPage />} />
         <Route path="/event/:season/:eventCode" element={<EventPage />} />
+        <Route path="/compare" element={<Navigate to={`/compare/${CURRENT_SEASON}`} replace />} />
+        <Route path="/compare/:season" element={<ComparePage />} />
         <Route path="/methodology" element={<MethodologyPage />} />
       </Routes>
     </BrowserRouter>

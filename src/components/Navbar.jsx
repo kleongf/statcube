@@ -2,16 +2,18 @@ import { NavLink, useMatch } from 'react-router-dom'
 import { CURRENT_SEASON } from '../lib/constants'
 
 export default function Navbar() {
-  const teamsMatch = useMatch('/teams/:season')
-  const eventsMatch = useMatch('/events/:season')
-  const teamMatch = useMatch('/team/:teamNumber/:season')
-  const eventMatch = useMatch('/event/:season/:eventCode')
+  const teamsMatch   = useMatch('/teams/:season')
+  const eventsMatch  = useMatch('/events/:season')
+  const teamMatch    = useMatch('/team/:teamNumber/:season')
+  const eventMatch   = useMatch('/event/:season/:eventCode')
+  const compareMatch = useMatch('/compare/:season')
 
   const season =
     teamsMatch?.params?.season ??
     eventsMatch?.params?.season ??
     teamMatch?.params?.season ??
     eventMatch?.params?.season ??
+    compareMatch?.params?.season ??
     String(CURRENT_SEASON)
 
   const linkClass = ({ isActive }) =>
@@ -32,6 +34,7 @@ export default function Navbar() {
         </span>
         <NavLink to={`/teams/${season}`} className={linkClass}>Teams</NavLink>
         <NavLink to={`/events/${season}`} className={linkClass}>Events</NavLink>
+        <NavLink to={`/compare/${season}`} className={linkClass}>Compare</NavLink>
         <NavLink to="/methodology" className={linkClass}>Methodology</NavLink>
       </div>
     </nav>
