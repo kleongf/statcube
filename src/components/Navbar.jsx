@@ -6,7 +6,8 @@ export default function Navbar() {
   const eventsMatch  = useMatch('/events/:season')
   const teamMatch    = useMatch('/team/:teamNumber/:season')
   const eventMatch   = useMatch('/event/:season/:eventCode')
-  const compareMatch = useMatch('/compare/:season')
+  const compareMatch  = useMatch('/compare/:season')
+  const allianceMatch = useMatch('/alliance/:season')
 
   const season =
     teamsMatch?.params?.season ??
@@ -14,6 +15,7 @@ export default function Navbar() {
     teamMatch?.params?.season ??
     eventMatch?.params?.season ??
     compareMatch?.params?.season ??
+    allianceMatch?.params?.season ??
     String(CURRENT_SEASON)
 
   const linkClass = ({ isActive }) =>
@@ -35,6 +37,7 @@ export default function Navbar() {
         <NavLink to={`/teams/${season}`} className={linkClass}>Teams</NavLink>
         <NavLink to={`/events/${season}`} className={linkClass}>Events</NavLink>
         <NavLink to={`/compare/${season}`} className={linkClass}>Compare</NavLink>
+        <NavLink to={`/alliance/${season}`} className={linkClass}>Alliance</NavLink>
         <NavLink to="/methodology" className={linkClass}>Methodology</NavLink>
       </div>
     </nav>
