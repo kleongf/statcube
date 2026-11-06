@@ -8,7 +8,7 @@ import epa
 import ftcscout
 import refresh
 import store
-from conftest import FakePost
+from conftest import FakeClient, FakePost, read_seasons
 
 
 class RecordingStore:
@@ -16,7 +16,7 @@ class RecordingStore:
         self.writes: list[tuple[int, Sequence[epa.TeamRow]]] = []
 
     def season(self, number: int) -> epa.Season:
-        return store.builtin_season(number)
+        return read_seasons(number)
 
     def write_ratings(self, season: int, rows: Sequence[epa.TeamRow]) -> None:
         self.writes.append((season, rows))
@@ -77,24 +77,16 @@ def test_a_masked_key_exits_2_before_any_network_call(capsys, no_network):
     assert no_network == []
 
 
-def test_a_season_without_parameters_exits_2_naming_it_and_fetches_nothing(capsys):
+def test_a_season_missing_from_the_seasons_table_exits_2_naming_it_and_fetches_nothing(capsys):
     def fetch_must_not_run(season: epa.Season) -> epa.SeasonMatches:
         raise AssertionError("fetched")
 
-    code = refresh.main(["run", "--season", "2026"], fetch=fetch_must_not_run, store=RecordingStore())
+    sink = store.SupabaseStore(FakeClient(seasons=[]))
+
+    code = refresh.main(["run", "--season", "2019"], fetch=fetch_must_not_run, store=sink)
 
     assert code == 2
-    assert "season 2026 has no parameters" in capsys.readouterr().err
-
-
-def test_a_season_without_parameters_exits_2_with_credentials_set(capsys, no_network):
-    env = {"SUPABASE_URL": "https://example.supabase.co", "SUPABASE_SECRET_KEY": "placeholder-key"}
-
-    code = refresh.main(["run", "--season", "2026"], env=env)
-
-    assert code == 2
-    assert "season 2026 has no parameters" in capsys.readouterr().err
-    assert no_network == []
+    assert "season 2019 has no parameters" in capsys.readouterr().err
 
 
 def test_a_failed_write_exits_1(raw_events, capsys):
@@ -108,13 +100,22 @@ def test_a_failed_write_exits_1(raw_events, capsys):
     assert "boom" in capsys.readouterr().err
 
 
-def test_dry_run_needs_no_credentials_and_writes_the_rows_to_the_given_path(raw_events, tmp_path, capsys):
+def test_dry_run_reads_parameters_through_the_store_and_writes_the_rows_to_the_given_path(raw_events, tmp_path, capsys):
     path = tmp_path / "rows.json"
+    sink = store.DryRunStore(path, read_seasons)
 
-    code = refresh.main(["run", "--season", "2025", "--dry-run", str(path)], env={}, fetch=fetch_from(FakePost(raw_events)))
+    code = refresh.main(["run", "--season", "2025", "--dry-run", str(path)], fetch=fetch_from(FakePost(raw_events)), store=sink)
 
     assert code == 0
     assert capsys.readouterr().out.splitlines()[-1].startswith("refreshed season=2025 teams=14")
     rows = json.loads(path.read_text())
     assert len(rows) == 14
     assert {"rank_epa", "rank_auto_epa", "rank_teleop_epa", "current_epa"} <= set(rows[0])
+
+
+def test_dry_run_needs_the_supabase_variables_because_it_reads_the_parameters(capsys, no_network):
+    code = refresh.main(["run", "--season", "2025", "--dry-run"], env={})
+
+    assert code == 2
+    assert "SUPABASE_URL, SUPABASE_SECRET_KEY" in capsys.readouterr().err
+    assert no_network == []

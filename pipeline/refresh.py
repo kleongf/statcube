@@ -48,7 +48,7 @@ def _parser() -> argparse.ArgumentParser:
         nargs="?",
         const="",
         metavar="PATH",
-        help="write the rows to PATH (default epa_<season>.dry.json) instead of Supabase",
+        help="read the season parameters from Supabase, but write the rows to PATH (default epa_<season>.dry.json) instead",
     )
     return parser
 
@@ -69,7 +69,7 @@ def main(
             if args.dry_run is None:
                 store = SupabaseStore.from_env(env)
             else:
-                store = DryRunStore(Path(args.dry_run or f"epa_{args.season}.dry.json"))
+                store = DryRunStore(Path(args.dry_run or f"epa_{args.season}.dry.json"), SupabaseStore.from_env(env).season)
         if fetch is None:
             fetch = partial(ftcscout.fetch_season, post=ftcscout.http_post(env.get("FTCSCOUT_GRAPHQL_URL", ftcscout.DEFAULT_URL)))
         summary = refresh_season(args.season, store, fetch=fetch)

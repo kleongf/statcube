@@ -8,33 +8,12 @@ from postgrest.exceptions import APIError
 
 import epa
 import store
+from conftest import SEASON_2025, FakeClient, read_seasons
 
 
 def team_row(number: int) -> epa.TeamRow:
     history = (epa.Point("2025-12-01T10:00:00.000Z", 40.5, 10.25, 30.25), epa.Point("2025-12-01T11:00:00.000Z", 44.0, 11.0, 33.0))
     return epa.TeamRow(number, f"Team {number}", history, epa.Ranks(7, 8, 9))
-
-
-class FakeClient:
-
-    def __init__(self, errors: list[Exception] | None = None) -> None:
-        self.errors = list(errors or [])
-        self.upserts: list[tuple[str, list[dict], dict]] = []
-        self._table = ""
-        self._pending: tuple[list[dict], dict] = ([], {})
-
-    def table(self, name: str) -> FakeClient:
-        self._table = name
-        return self
-
-    def upsert(self, records: list[dict], **kwargs) -> FakeClient:
-        self._pending = (records, kwargs)
-        return self
-
-    def execute(self) -> None:
-        if self.errors:
-            raise self.errors.pop(0)
-        self.upserts.append((self._table, *self._pending))
 
 
 def make_store(client: FakeClient) -> tuple[store.SupabaseStore, list[float]]:
@@ -60,10 +39,22 @@ def test_record_carries_history_maps_current_values_and_ranks():
     }
 
 
-def test_builtin_seasons_cover_2022_to_2025_and_nothing_else():
-    assert [builtin for builtin in range(2021, 2028) if builtin in store.BUILTIN_SEASONS] == [2022, 2023, 2024, 2025]
+def test_season_reads_the_seasons_row_into_total_and_auto_params():
+    row = {"season": 2024, "mean": 43.04, "a": 3.5888, "p": 0.5686, "mean_auto": 6.685, "a_auto": 2.2793, "p_auto": 0.6143}
+    client = FakeClient(seasons=[row])
+    sut, _ = make_store(client)
+
+    spec = sut.season(2024)
+
+    assert spec == epa.Season(2024, epa.EpaParams(epa.RatingParams(43.04, 3.5888, 0.5686), epa.RatingParams(6.685, 2.2793, 0.6143)))
+    assert client.selects == [("seasons", {"season": 2024})]
+
+
+def test_season_without_a_row_raises_unknown_season_naming_it():
+    sut, _ = make_store(FakeClient(seasons=[]))
+
     with pytest.raises(store.UnknownSeason, match="2026"):
-        store.builtin_season(2026)
+        sut.season(2026)
 
 
 def test_write_ratings_upserts_in_batches_of_500_in_team_order():
@@ -152,10 +143,18 @@ def test_from_env_builds_a_store_without_touching_the_network(no_network):
 
 def test_dry_run_store_writes_the_records_the_upsert_would_send(tmp_path):
     path = tmp_path / "rows.json"
-    sut = store.DryRunStore(path)
+    sut = store.DryRunStore(path, read_seasons)
 
     sut.write_ratings(2025, [team_row(2), team_row(1)])
 
     written = json.loads(path.read_text())
     assert [r["team_number"] for r in written] == [1, 2]
     assert written[0] == store.to_record(team_row(1))
+
+
+def test_dry_run_store_serves_seasons_from_its_reader(tmp_path):
+    sut = store.DryRunStore(tmp_path / "rows.json", read_seasons)
+
+    assert sut.season(2025) == SEASON_2025
+    with pytest.raises(store.UnknownSeason, match="2019"):
+        sut.season(2019)

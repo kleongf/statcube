@@ -19,12 +19,7 @@ BATCH_ROWS = 500
 ATTEMPTS = 3
 REQUEST_TIMEOUT_S = 120
 
-BUILTIN_SEASONS: Mapping[int, EpaParams] = {
-    2025: EpaParams(RatingParams(113.30 / 2, 2.1482, 0.6543), RatingParams(25.33 / 2, 2.4555, 0.5535)),
-    2024: EpaParams(RatingParams(86.08 / 2, 3.5888, 0.5686), RatingParams(13.37 / 2, 2.2793, 0.6143)),
-    2023: EpaParams(RatingParams(72.08 / 2, 3.4415, 0.5729), RatingParams(21.38 / 2, 4.1423, 0.4741)),
-    2022: EpaParams(RatingParams(60.25 / 2, 5.0015, 0.4623), RatingParams(19.70 / 2, 5.0384, 0.3443)),
-}
+SEASON_COLUMNS = "season, mean, a, p, mean_auto, a_auto, p_auto"
 
 
 class MissingEnv(Exception):
@@ -56,11 +51,14 @@ class Store(Protocol):
     def write_ratings(self, season: int, rows: Sequence[TeamRow]) -> None: ...
 
 
-def builtin_season(number: int) -> Season:
-    params = BUILTIN_SEASONS.get(number)
-    if params is None:
-        raise UnknownSeason(number)
-    return Season(number, params)
+def season_from_row(row: Mapping[str, Any]) -> Season:
+    return Season(
+        row["season"],
+        EpaParams(
+            RatingParams(row["mean"], row["a"], row["p"]),
+            RatingParams(row["mean_auto"], row["a_auto"], row["p_auto"]),
+        ),
+    )
 
 
 def to_record(row: TeamRow) -> dict[str, Any]:
@@ -106,7 +104,10 @@ class SupabaseStore:
         return cls(client)
 
     def season(self, number: int) -> Season:
-        return builtin_season(number)
+        rows = self._client.table("seasons").select(SEASON_COLUMNS).eq("season", number).execute().data
+        if not rows:
+            raise UnknownSeason(number)
+        return season_from_row(rows[0])
 
     def write_ratings(self, season: int, rows: Sequence[TeamRow]) -> None:
         ordered = sorted(rows, key=lambda r: r.team_number)
@@ -129,7 +130,7 @@ class SupabaseStore:
 
 class DryRunStore:
 
-    def __init__(self, path: Path, read: Callable[[int], Season] = builtin_season) -> None:
+    def __init__(self, path: Path, read: Callable[[int], Season]) -> None:
         self._path = path
         self._read = read
 
