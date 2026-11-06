@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 import httpx
-from postgrest.exceptions import APIError
 from supabase import ClientOptions, create_client
 
 from epa import EpaParams, RatingParams, Season, TeamRow
@@ -18,6 +18,7 @@ REQUIRED_ENV = ("SUPABASE_URL", "SUPABASE_SECRET_KEY")
 BATCH_ROWS = 500
 ATTEMPTS = 3
 REQUEST_TIMEOUT_S = 120
+PRINTABLE_ASCII = re.compile(r"[!-~]+")
 
 BUILTIN_SEASONS: Mapping[int, EpaParams] = {
     2025: EpaParams(RatingParams(113.30 / 2, 2.1482, 0.6543), RatingParams(25.33 / 2, 2.4555, 0.5535)),
@@ -33,12 +34,12 @@ class MissingEnv(Exception):
         super().__init__(f"missing environment variable(s): {', '.join(self.names)}")
 
 
-class MaskedKey(Exception):
-    def __init__(self, name: str) -> None:
-        super().__init__(
-            f"{name} has non-ASCII characters, so it is probably a masked copy. "
-            "Copy it again with `supabase projects api-keys --reveal`."
-        )
+class InvalidEnv(Exception):
+    pass
+
+
+class ServerError(Exception):
+    """A 5xx reply. Raised from the HTTP layer because postgrest-py drops the status when the body is JSON."""
 
 
 class UnknownSeason(Exception):
@@ -79,31 +80,56 @@ def to_record(row: TeamRow) -> dict[str, Any]:
     }
 
 
+def redact(text: str, secret: str) -> str:
+    secret = secret.strip()
+    return text.replace(secret, "***") if secret else text
+
+
+def _parse_env(env: Mapping[str, str]) -> tuple[str, str]:
+    missing = [name for name in REQUIRED_ENV if not env.get(name)]
+    if missing:
+        raise MissingEnv(missing)
+    for name in REQUIRED_ENV:
+        if not PRINTABLE_ASCII.fullmatch(env[name]):
+            raise InvalidEnv(
+                f"{name} has spaces, line breaks, or non-ASCII characters. "
+                "Copy it again exactly; for the key, `supabase projects api-keys --reveal` prints it unmasked."
+            )
+    if not env["SUPABASE_URL"].startswith(("http://", "https://")):
+        raise InvalidEnv("SUPABASE_URL must start with http:// or https://")
+    return env["SUPABASE_URL"], env["SUPABASE_SECRET_KEY"]
+
+
+def _raise_server_error(response: httpx.Response) -> None:
+    if response.is_server_error:
+        response.read()
+        raise ServerError(f"HTTP {response.status_code}: {response.text}")
+
+
 def _is_retryable(exc: Exception) -> bool:
-    if isinstance(exc, httpx.TransportError):
-        return True
-    # APIError.code is the HTTP status for non-JSON replies and a 5-character
-    # Postgres code ("42501") or PGRST code otherwise.
-    return isinstance(exc, APIError) and exc.code is not None and len(exc.code) == 3 and exc.code.startswith("5")
+    return isinstance(exc, (httpx.TransportError, ServerError))
 
 
 class SupabaseStore:
-    def __init__(self, client: Any, *, sleep: Callable[[float], None] = time.sleep) -> None:
+    def __init__(self, client: Any, *, secret: str = "", sleep: Callable[[float], None] = time.sleep) -> None:
         self._client = client
+        self._secret = secret
         self._sleep = sleep
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str]) -> SupabaseStore:
-        missing = [name for name in REQUIRED_ENV if not env.get(name)]
-        if missing:
-            raise MissingEnv(missing)
-        if not env["SUPABASE_SECRET_KEY"].isascii():
-            raise MaskedKey("SUPABASE_SECRET_KEY")
-        http_client = httpx.Client(http2=False, timeout=REQUEST_TIMEOUT_S)
-        client = create_client(
-            env["SUPABASE_URL"], env["SUPABASE_SECRET_KEY"], options=ClientOptions(httpx_client=http_client),
+    def from_env(
+        cls,
+        env: Mapping[str, str],
+        *,
+        transport: httpx.BaseTransport | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> SupabaseStore:
+        url, secret = _parse_env(env)
+        http_client = httpx.Client(
+            http2=False, timeout=REQUEST_TIMEOUT_S, transport=transport, event_hooks={"response": [_raise_server_error]},
         )
-        return cls(client)
+        client = create_client(url, secret, options=ClientOptions(httpx_client=http_client))
+        return cls(client, secret=secret, sleep=sleep)
 
     def season(self, number: int) -> Season:
         return builtin_season(number)
@@ -120,9 +146,10 @@ class SupabaseStore:
                     self._client.table(f"epa_{season}").upsert(records, on_conflict="team_number").execute()
                     break
                 except Exception as exc:
+                    reason = redact(str(exc), self._secret)
                     if attempt == ATTEMPTS or not _is_retryable(exc):
-                        raise WriteFailed(f"{label} failed on attempt {attempt}: {exc}") from exc
-                    logger.warning("%s attempt %d failed (%s), retrying", label, attempt, exc)
+                        raise WriteFailed(f"{label} failed on attempt {attempt}: {reason}") from exc
+                    logger.warning("%s attempt %d failed (%s), retrying", label, attempt, reason)
                     self._sleep(2 ** (attempt - 1))
             logger.info("%s written in %.1fs", label, time.monotonic() - started)
 

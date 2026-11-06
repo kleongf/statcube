@@ -4,7 +4,6 @@ import json
 
 import httpx
 import pytest
-from postgrest.exceptions import APIError
 
 import epa
 import store
@@ -100,25 +99,82 @@ def test_write_ratings_raises_write_failed_after_three_attempts():
     assert sleeps == [1, 2]
 
 
-def test_write_ratings_does_not_retry_a_client_error():
-    rls = APIError({"message": "new row violates row-level security policy", "code": "42501"})
-    client = FakeClient([rls])
-    sut, sleeps = make_store(client)
-
-    with pytest.raises(store.WriteFailed, match="row-level security"):
-        sut.write_ratings(2025, [team_row(1)])
-
-    assert sleeps == []
+ENV = {"SUPABASE_URL": "https://example.supabase.co", "SUPABASE_SECRET_KEY": "sb_secret_CANARY0123456789"}
 
 
-def test_write_ratings_retries_a_5xx_from_the_gateway():
-    client = FakeClient([APIError({"message": "Bad Gateway", "code": "502"})])
-    sut, sleeps = make_store(client)
+def failing_once_with(status: int, body: str, content_type: str) -> tuple[httpx.MockTransport, list[httpx.Request]]:
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if len(seen) == 1:
+            return httpx.Response(status, text=body, headers={"content-type": content_type})
+        return httpx.Response(201, json=[])
+
+    return httpx.MockTransport(handle), seen
+
+
+def real_store(transport: httpx.MockTransport) -> tuple[store.SupabaseStore, list[float]]:
+    sleeps: list[float] = []
+    return store.SupabaseStore.from_env(ENV, transport=transport, sleep=sleeps.append), sleeps
+
+
+JSON = "application/json"
+HTML = "text/html"
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "content_type"),
+    [
+        (502, json.dumps({"message": "An invalid response was received from the upstream server"}), JSON),
+        (503, json.dumps({"code": "PGRST002", "message": "Could not query the database for the schema cache."}), JSON),
+        (500, json.dumps({"code": "57014", "message": "canceling statement due to statement timeout"}), JSON),
+        (503, "<html>upstream unavailable</html>", HTML),
+    ],
+)
+def test_write_ratings_retries_any_5xx_reply_whatever_its_body(status, body, content_type):
+    transport, seen = failing_once_with(status, body, content_type)
+    sut, sleeps = real_store(transport)
 
     sut.write_ratings(2025, [team_row(1)])
 
-    assert len(client.upserts) == 1
+    assert len(seen) == 2
     assert sleeps == [1]
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "content_type"),
+    [
+        (403, json.dumps({"code": "42501", "message": "new row violates row-level security policy"}), JSON),
+        (401, json.dumps({"code": "PGRST301", "message": "JWT expired"}), JSON),
+        (401, "Unauthorized", "text/plain"),
+        (404, "<html>not found</html>", HTML),
+    ],
+)
+def test_write_ratings_does_not_retry_a_4xx_reply(status, body, content_type):
+    transport, seen = failing_once_with(status, body, content_type)
+    sut, sleeps = real_store(transport)
+
+    with pytest.raises(store.WriteFailed, match="failed on attempt 1"):
+        sut.write_ratings(2025, [team_row(1)])
+
+    assert len(seen) == 1
+    assert sleeps == []
+
+
+def test_write_ratings_never_prints_the_key_from_an_error_that_quotes_it(caplog):
+    key = ENV["SUPABASE_SECRET_KEY"]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        raise httpx.LocalProtocolError(f"Illegal header value b'Bearer {key}'")
+
+    sut, _ = real_store(httpx.MockTransport(handle))
+
+    with pytest.raises(store.WriteFailed) as caught:
+        sut.write_ratings(2025, [team_row(1)])
+
+    assert "***" in str(caught.value)
+    assert key not in str(caught.value) + caplog.text
 
 
 def test_from_env_names_every_missing_variable():
@@ -127,18 +183,6 @@ def test_from_env_names_every_missing_variable():
 
     assert caught.value.names == ("SUPABASE_URL", "SUPABASE_SECRET_KEY")
     assert "SUPABASE_URL, SUPABASE_SECRET_KEY" in str(caught.value)
-
-
-def test_from_env_rejects_a_masked_key_without_echoing_it(no_network):
-    masked = "sb_secret_\u2022\u2022\u2022\u2022\u2022\u2022"
-    env = {"SUPABASE_URL": "https://example.supabase.co", "SUPABASE_SECRET_KEY": masked}
-
-    with pytest.raises(store.MaskedKey) as caught:
-        store.SupabaseStore.from_env(env)
-
-    assert "SUPABASE_SECRET_KEY" in str(caught.value)
-    assert masked not in str(caught.value)
-    assert no_network == []
 
 
 def test_from_env_builds_a_store_without_touching_the_network(no_network):

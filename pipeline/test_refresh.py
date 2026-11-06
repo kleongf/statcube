@@ -4,6 +4,8 @@ import json
 from functools import partial
 from typing import Sequence
 
+import pytest
+
 import epa
 import ftcscout
 import refresh
@@ -67,13 +69,28 @@ def test_missing_credentials_exit_2_naming_them_before_any_network_call(capsys, 
     assert no_network == []
 
 
-def test_a_masked_key_exits_2_before_any_network_call(capsys, no_network):
-    env = {"SUPABASE_URL": "https://example.supabase.co", "SUPABASE_SECRET_KEY": "sb_secret_\u2022\u2022\u2022"}
+KEY = "sb_secret_CANARY0123456789"
+URL = "https://example.supabase.co"
 
-    code = refresh.main(["run", "--season", "2025"], env=env)
 
+@pytest.mark.parametrize(
+    ("name", "url", "key"),
+    [
+        ("SUPABASE_SECRET_KEY", URL, "sb_secret_\u2022\u2022\u2022"),
+        ("SUPABASE_SECRET_KEY", URL, KEY + "\n"),
+        ("SUPABASE_SECRET_KEY", URL, KEY + "\r\n"),
+        ("SUPABASE_SECRET_KEY", URL, " " + KEY),
+        ("SUPABASE_URL", "example.supabase.co", KEY),
+        ("SUPABASE_URL", URL + "\n", KEY),
+    ],
+)
+def test_a_malformed_credential_exits_2_naming_it_without_echoing_the_key_or_calling_out(name, url, key, capsys, no_network):
+    code = refresh.main(["run", "--season", "2025"], env={"SUPABASE_URL": url, "SUPABASE_SECRET_KEY": key})
+
+    out = capsys.readouterr()
     assert code == 2
-    assert "--reveal" in capsys.readouterr().err
+    assert name in out.err
+    assert KEY not in out.out + out.err
     assert no_network == []
 
 
