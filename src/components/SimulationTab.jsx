@@ -3,6 +3,7 @@ import { rankingRulesFor, replayRankings } from '../lib/rankings'
 import { mulberry32, runSimulations, topNProbability, upcomingMatches } from '../lib/simulate'
 
 const RUN_OPTIONS = [100, 1000, 10000]
+const UNRANKED = '–'
 
 function Th({ children, align = 'right', className = '' }) {
   return (
@@ -51,10 +52,10 @@ function StandingsTable({ standings, names }) {
     >
       {standings.map((row) => (
         <tr key={row.teamNumber} className={rowClass}>
-          <td className="px-4 py-3 tabular-nums font-medium text-gray-300">{row.rank}</td>
+          <td className="px-4 py-3 tabular-nums font-medium text-gray-300">{row.rank ?? UNRANKED}</td>
           <TeamCell teamNumber={row.teamNumber} name={names.get(row.teamNumber)} />
           <td className={`${numCell} text-gray-400`}>{row.matchesPlayed}</td>
-          <td className={`${numCell} font-medium text-gray-200`}>{row.rp.toFixed(2)}</td>
+          <td className={`${numCell} font-medium text-gray-200`}>{row.rank === null ? UNRANKED : row.rp.toFixed(2)}</td>
         </tr>
       ))}
     </Table>
@@ -79,9 +80,9 @@ function ResultsTable({ result, names, topN }) {
     >
       {rows.map((t) => (
         <tr key={t.teamNumber} className={rowClass}>
-          <td className="px-4 py-3 tabular-nums font-medium text-gray-300">{t.startRank}</td>
+          <td className="px-4 py-3 tabular-nums font-medium text-gray-300">{t.startRank ?? UNRANKED}</td>
           <TeamCell teamNumber={t.teamNumber} name={names.get(t.teamNumber)} />
-          <td className={`${numCell} text-gray-400`}>{t.startRp.toFixed(2)}</td>
+          <td className={`${numCell} text-gray-400`}>{t.startRank === null ? UNRANKED : t.startRp.toFixed(2)}</td>
           <td className={`${numCell} font-medium text-gray-200`}>{t.meanRp.toFixed(2)}</td>
           <td className={`${numCell} font-medium text-blue-300`}>{t.meanRank.toFixed(1)}</td>
           <td className={`${numCell} text-gray-400`}>{t.p10Rank}–{t.p90Rank}</td>
@@ -111,18 +112,44 @@ function ReplayCheck({ standings, officialTeams }) {
   )
 }
 
-export default function SimulationTab({ event, season, ratings, params }) {
+function matchCount(count) {
+  return `${count.toLocaleString()} ${count === 1 ? 'match' : 'matches'}`
+}
+
+function Notice({ children }) {
+  return <div className="bg-gray-900 rounded-xl border border-gray-800 px-5 py-4 text-gray-300 text-sm">{children}</div>
+}
+
+function modelNote(rules, ratings, playedQuals) {
+  const rating = ratings.size > 0 ? 'Teams rated by EPA.' : 'No EPA ratings loaded, so every team is rated average.'
+  const bonus =
+    rules.bonusRps.length === 0
+      ? ''
+      : playedQuals === 0
+        ? ' Bonus RPs not modeled yet.'
+        : " Each bonus RP is drawn at the alliance's average rate of earning it in the quals played so far."
+  return `${rating}${bonus} RP ties break at random.`
+}
+
+function leaderSummary(result, names) {
+  const leader = result.teams.reduce((best, t) => (t.rankCounts[0] > best.rankCounts[0] ? t : best))
+  const name = names.get(leader.teamNumber)
+  const share = Math.round((leader.rankCounts[0] / result.runs) * 100)
+  return `${result.runs.toLocaleString()} simulations. Team ${leader.teamNumber}${name ? ` ${name}` : ''} finishes first most often, in ${share}% of runs.`
+}
+
+export default function SimulationTab({ event, season, ratings, params, settings, onSettingsChange }) {
   const rules = rankingRulesFor(season)
-  const [runs, setRuns] = useState(1000)
-  const [topN, setTopN] = useState(4)
-  const [seed, setSeed] = useState(1)
+  const { runs, seed } = settings
+  const [topNText, setTopNText] = useState(String(settings.topN))
+  const update = (patch) => onSettingsChange((current) => ({ ...current, ...patch }))
 
   const names = useMemo(() => new Map(event.teams.map((t) => [t.teamNumber, t.team?.name ?? ''])), [event.teams])
   const standings = useMemo(() => (rules ? replayRankings(event.matches, rules) : []), [event.matches, rules])
-  const upcoming = useMemo(() => upcomingMatches(event.matches), [event.matches])
+  const upcoming = useMemo(() => upcomingMatches(event), [event])
   const result = useMemo(
     () =>
-      upcoming.length > 0 && standings.length > 0
+      ratings && upcoming.length > 0 && standings.length > 0
         ? runSimulations({ standings, upcoming, ratings, params, rules, runs, rng: mulberry32(seed) })
         : null,
     [rules, standings, upcoming, ratings, params, runs, seed],
@@ -143,26 +170,36 @@ export default function SimulationTab({ event, season, ratings, params }) {
     )
   }
 
-  const totalQuals = event.matches.filter((m) => m.tournamentLevel === 'Quals').length
-  const played = totalQuals - upcoming.length
+  const quals = event.matches.filter((m) => m.tournamentLevel === 'Quals')
+  const playedQuals = quals.filter((m) => m.hasBeenPlayed).length
+  const neverPlayed = upcoming.length === 0 ? quals.length - playedQuals : 0
+  const topN = Math.min(settings.topN, standings.length)
+  const commitTopN = (text) => {
+    const value = Number(text)
+    if (text.trim() !== '' && Number.isFinite(value)) update({ topN: Math.min(standings.length, Math.max(1, Math.round(value))) })
+  }
 
   return (
     <div className="space-y-4">
       <div className="space-y-1">
         <p className="text-gray-300 text-sm">
-          {played} of {totalQuals} qualification matches played. Starting standings are replayed from the match results.
+          {playedQuals} of {quals.length} qualification matches played. Starting standings are replayed from the match results.
         </p>
         <ReplayCheck standings={standings} officialTeams={event.teams} />
       </div>
 
-      {!result && (
+      {upcoming.length === 0 && (
         <>
-          <div className="bg-gray-900 rounded-xl border border-gray-800 px-5 py-4 text-gray-300 text-sm">
-            All qualification matches are played, so there is nothing to simulate. These are the final standings.
-          </div>
+          <Notice>
+            {neverPlayed > 0
+              ? `The event is over, so these are the final standings. ${neverPlayed === 1 ? '1 scheduled qualification match was' : `${neverPlayed} scheduled qualification matches were`} not played.`
+              : 'All qualification matches are played, so there is nothing to simulate. These are the final standings.'}
+          </Notice>
           <StandingsTable standings={standings} names={names} />
         </>
       )}
+
+      {upcoming.length > 0 && !ratings && <Notice>Loading EPA ratings…</Notice>}
 
       {result && (
         <>
@@ -171,7 +208,7 @@ export default function SimulationTab({ event, season, ratings, params }) {
               Simulations
               <select
                 value={runs}
-                onChange={(e) => setRuns(Number(e.target.value))}
+                onChange={(e) => update({ runs: Number(e.target.value) })}
                 className="bg-gray-900 border border-gray-700 rounded-md px-2 py-1 text-white"
               >
                 {RUN_OPTIONS.map((n) => (
@@ -185,22 +222,30 @@ export default function SimulationTab({ event, season, ratings, params }) {
                 type="number"
                 min={1}
                 max={standings.length}
-                value={topN}
-                onChange={(e) => setTopN(Math.min(standings.length, Math.max(1, Number(e.target.value) || 1)))}
+                step={1}
+                value={topNText}
+                onChange={(e) => {
+                  setTopNText(e.target.value)
+                  commitTopN(e.target.value)
+                }}
+                onBlur={() => setTopNText(String(topN))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                }}
                 className="bg-gray-900 border border-gray-700 rounded-md px-2 py-1 w-16 text-white"
               />
             </label>
             <button
-              onClick={() => setSeed(Math.floor(Math.random() * 2 ** 32))}
+              onClick={() => update({ seed: Math.floor(Math.random() * 2 ** 32) })}
               className="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors"
             >
               Run again
             </button>
             <span className="text-gray-500">
-              {upcoming.length} matches left. {ratings.size > 0 ? 'Teams rated by EPA.' : 'No EPA ratings loaded, so every team is rated average.'}
-              {' '}Win and tie RP only. Bonus RPs are not simulated.
+              {matchCount(upcoming.length)} left. {modelNote(rules, ratings, playedQuals)}
             </span>
           </div>
+          <p aria-live="polite" className="text-gray-300 text-sm">{leaderSummary(result, names)}</p>
           <ResultsTable result={result} names={names} topN={topN} />
         </>
       )}

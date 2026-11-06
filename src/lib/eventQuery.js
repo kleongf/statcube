@@ -8,6 +8,7 @@ export function getEventQuery(season) {
         location { city country state }
         start
         end
+        finished
         code
         matches {
           matchNum

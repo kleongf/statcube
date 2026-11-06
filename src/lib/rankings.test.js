@@ -109,14 +109,25 @@ describe('replayRankings rules', () => {
     expect(rows.find((r) => r.teamNumber === 2)).toMatchObject({ matchesPlayed: 1, wins: 1, rpTotal: 2 })
   })
 
-  it('lists every team of an unplayed event at zero RP, ranked by team number', () => {
+  it('leaves every team of an unplayed event unranked', () => {
     const rows = replayRankings([qual([7, 5], [9, 3], null)], rules2025)
-    expect(rows.map((r) => [r.rank, r.teamNumber, r.rp, r.matchesPlayed])).toEqual([
-      [1, 3, 0, 0],
-      [2, 5, 0, 0],
-      [3, 7, 0, 0],
-      [4, 9, 0, 0],
+    expect(rows.map((r) => [r.rank, r.teamNumber, r.matchesPlayed])).toEqual([
+      [null, 3, 0],
+      [null, 5, 0],
+      [null, 7, 0],
+      [null, 9, 0],
     ])
+  })
+
+  it('ranks only teams with a counted match, so a surrogate-only team does not push others down', () => {
+    const rows = replayRankings(
+      [qual([1, 2], [3, 4], 50, 30), qual([1, team(5, 'Red', { surrogate: true })], [2, 9], 0, 40), qual([6, 7], [8, 10], null)],
+      rules2024,
+    )
+    const ranks = Object.fromEntries(rows.map((r) => [r.teamNumber, r.rank]))
+    expect(ranks).toMatchObject({ 5: null, 6: null, 7: null, 8: null, 10: null })
+    expect([1, 2, 3, 4, 9].map((t) => ranks[t]).sort()).toEqual([1, 2, 3, 4, 5])
+    expect(ranks[9]).toBe(2)
   })
 
   it('ignores playoff matches', () => {

@@ -51,7 +51,16 @@ export function replayRankings(matches, rules) {
     for (const entry of match.teams) {
       let row = acc.get(entry.teamNumber)
       if (!row) {
-        row = { teamNumber: entry.teamNumber, matchesPlayed: 0, wins: 0, losses: 0, ties: 0, rpTotal: 0, tbTotals: rules.tiebreaks.map(() => 0) }
+        row = {
+          teamNumber: entry.teamNumber,
+          matchesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          ties: 0,
+          rpTotal: 0,
+          tbTotals: rules.tiebreaks.map(() => 0),
+          bonusCounts: rules.bonusRps.map(() => 0),
+        }
         acc.set(entry.teamNumber, row)
       }
       // Only surrogate entries earn nothing. ftcscout counts a DQ, no-show, or off-field
@@ -66,6 +75,7 @@ export function replayRankings(matches, rules) {
       else if (own.totalPoints < opp.totalPoints) row.losses++
       else row.ties++
       rules.tiebreaks.forEach((field, i) => { row.tbTotals[i] += own[field] })
+      rules.bonusRps.forEach((field, i) => { if (own[field]) row.bonusCounts[i]++ })
     }
   }
   const rows = [...acc.values()].map(({ tbTotals, ...row }) => ({
@@ -73,7 +83,10 @@ export function replayRankings(matches, rules) {
     rp: row.matchesPlayed ? row.rpTotal / row.matchesPlayed : 0,
     tiebreaks: tbTotals.map((total) => (row.matchesPlayed ? total / row.matchesPlayed : 0)),
   }))
-  rows.sort(compareRankings)
-  rows.forEach((row, i) => { row.rank = i + 1 })
-  return rows
+  // ftcscout gives a team no stats, and so no rank, until it has a counted match.
+  const ranked = rows.filter((row) => row.matchesPlayed > 0).sort(compareRankings)
+  const unranked = rows.filter((row) => row.matchesPlayed === 0).sort((a, b) => a.teamNumber - b.teamNumber)
+  ranked.forEach((row, i) => { row.rank = i + 1 })
+  unranked.forEach((row) => { row.rank = null })
+  return [...ranked, ...unranked]
 }
