@@ -2,8 +2,7 @@
 //   winRp, tieRp   ranking points for a win or a tie
 //   bonusRps       alliance score fields that award 1 RP each when true
 //   tiebreaks      alliance score fields whose per-match average breaks RP ties, in order
-// After the tiebreaks, the lower team number ranks first. ftcscout does the same
-// (9 of 9 fully tied pairs checked in 553 events, 2022-2026).
+// After the tiebreaks, the lower team number ranks first, as on ftcscout.
 export const RANKING_RULES = {
   2022: { winRp: 2, tieRp: 1, bonusRps: [], tiebreaks: ['autoPoints', 'egPoints'] },
   2023: { winRp: 2, tieRp: 1, bonusRps: [], tiebreaks: ['autoPoints', 'egPoints'] },
