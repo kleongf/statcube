@@ -6,7 +6,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['epa_2022', 'epa_2023', 'epa_2024', 'epa_2025', 'epa_2026'] loop
+  foreach t in array array['epa_2022', 'epa_2023', 'epa_2024', 'epa_2025'] loop
     execute format('insert into %I (team_number, team_name) values (99999, %L)', t, 'seed');
   end loop;
 end $$;
@@ -18,7 +18,7 @@ declare
   t text;
   n bigint;
 begin
-  foreach t in array array['epa_2022', 'epa_2023', 'epa_2024', 'epa_2025', 'epa_2026'] loop
+  foreach t in array array['epa_2022', 'epa_2023', 'epa_2024', 'epa_2025'] loop
     execute format('select count(*) from %I where team_number = 99999', t) into n;
     if n <> 1 then
       raise exception '%: anon select saw % rows of the seeded row, expected 1', t, n;

@@ -43,14 +43,3 @@ create table if not exists epa_2025 (
   current_auto_epa double precision,
   current_teleop_epa double precision
 );
-
-create table if not exists epa_2026 (
-  team_number integer primary key,
-  team_name text,
-  epa jsonb,
-  auto_epa jsonb,
-  teleop_epa jsonb,
-  current_epa double precision,
-  current_auto_epa double precision,
-  current_teleop_epa double precision
-);
