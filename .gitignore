@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local reference scripts, never tracked
+stats/
+
+# Pipeline Python environment
+pipeline/.venv/
+pipeline/**/__pycache__/
+.pytest_cache/
