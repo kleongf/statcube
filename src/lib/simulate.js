@@ -37,12 +37,28 @@ export function bonusRates(standings, fieldCount) {
   )
 }
 
+function bonusCountCdf(rates) {
+  let pmf = [1]
+  for (const p of rates) {
+    const next = new Array(pmf.length + 1).fill(0)
+    pmf.forEach((mass, count) => {
+      next[count] += mass * (1 - p)
+      next[count + 1] += mass * p
+    })
+    pmf = next
+  }
+  const cdf = new Float64Array(pmf.length)
+  let total = 0
+  pmf.forEach((mass, count) => { cdf[count] = total += mass })
+  return cdf
+}
+
 function allianceModel(entries, ratings, rates, params) {
   const onField = entries.filter((e) => e.onField)
   const mean = onField.reduce((sum, e) => sum + (ratings.get(e.teamNumber) ?? params.mean), 0)
   const teamRates = onField.map((e) => rates.get(e.teamNumber))
   const bonusP = teamRates.length ? teamRates[0].map((_, k) => teamRates.reduce((sum, r) => sum + r[k], 0) / teamRates.length) : []
-  return { mean, std: params.a * Math.pow(Math.max(1, mean), params.p), bonusP }
+  return { mean, std: params.a * Math.pow(Math.max(1, mean), params.p), bonusCdf: bonusCountCdf(bonusP) }
 }
 
 function percentile(rankCounts, runs, fraction) {
@@ -83,7 +99,13 @@ export function runSimulations({ standings, upcoming, ratings, params, rules: { 
   const rankCounts = standings.map(() => new Int32Array(teamCount))
   const rankSum = new Float64Array(teamCount)
   const rpSum = new Float64Array(teamCount)
-  const field = standings.map((_, i) => ({ slot: i, rp: 0, randomTiebreak: 0 }))
+  const bySlot = standings.map((_, i) => ({ slot: i, rp: 0, randomTiebreak: 0 }))
+  const field = [...bySlot]
+  const hasMatchesLeft = new Uint8Array(teamCount)
+  for (const m of plan) for (const s of m.redSlots.concat(m.blueSlots)) hasMatchesLeft[s] = 1
+  const finishedSlots = []
+  for (let i = 0; i < teamCount; i++) if (!hasMatchesLeft[i]) finishedSlots.push(i)
+  const finishedKeys = new Float64Array(finishedSlots.length)
 
   let spare = null
   const normal = () => {
@@ -98,36 +120,46 @@ export function runSimulations({ standings, upcoming, ratings, params, rules: { 
     return radius * Math.cos(angle)
   }
   const bonus = (alliance) => {
-    let rp = 0
-    for (const p of alliance.bonusP) if (rng() < p) rp++
-    return rp
+    const cdf = alliance.bonusCdf
+    if (cdf.length === 1) return 0
+    const u = rng()
+    let count = 0
+    while (count < cdf.length - 1 && u >= cdf[count]) count++
+    return count
   }
   const award = (slots, rp) => {
-    for (const s of slots) {
-      rpTotal[s] += rp
-      played[s]++
+    for (let i = 0; i < slots.length; i++) {
+      rpTotal[slots[i]] += rp
+      played[slots[i]]++
     }
   }
 
   for (let run = 0; run < runs; run++) {
     rpTotal.set(baseRp)
     played.set(basePlayed)
-    for (const m of plan) {
+    for (let i = 0; i < plan.length; i++) {
+      const m = plan[i]
       const red = Math.max(0, Math.round(m.red.mean + m.red.std * normal()))
       const blue = Math.max(0, Math.round(m.blue.mean + m.blue.std * normal()))
       award(m.redSlots, (red > blue ? winRp : red === blue ? tieRp : 0) + bonus(m.red))
       award(m.blueSlots, (blue > red ? winRp : red === blue ? tieRp : 0) + bonus(m.blue))
     }
-    for (const f of field) {
+    for (let i = 0; i < teamCount; i++) {
+      const f = bySlot[i]
       f.rp = played[f.slot] ? rpTotal[f.slot] / played[f.slot] : 0
       f.randomTiebreak = rng()
     }
+    // Finished teams reuse their own sorted keys in standings order, so their replayed tiebreak order holds.
+    for (let j = 0; j < finishedSlots.length; j++) finishedKeys[j] = bySlot[finishedSlots[j]].randomTiebreak
+    finishedKeys.sort()
+    for (let j = 0; j < finishedSlots.length; j++) bySlot[finishedSlots[j]].randomTiebreak = finishedKeys[j]
     field.sort((a, b) => b.rp - a.rp || a.randomTiebreak - b.randomTiebreak)
-    field.forEach((f, position) => {
+    for (let position = 0; position < teamCount; position++) {
+      const f = field[position]
       rankCounts[f.slot][position]++
       rankSum[f.slot] += position + 1
       rpSum[f.slot] += f.rp
-    })
+    }
   }
 
   return {

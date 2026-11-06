@@ -128,7 +128,7 @@ function modelNote(rules, ratings, playedQuals) {
       : playedQuals === 0
         ? ' Bonus RPs not modeled yet.'
         : " Each bonus RP is drawn at the alliance's average rate of earning it in the quals played so far."
-  return `${rating}${bonus} RP ties break at random.`
+  return `${rating}${bonus} Teams still playing break RP ties at random. Finished teams keep their order.`
 }
 
 function leaderSummary(result, names) {
@@ -142,6 +142,7 @@ export default function SimulationTab({ event, season, ratings, params, settings
   const rules = rankingRulesFor(season)
   const { runs, seed } = settings
   const [topNText, setTopNText] = useState(String(settings.topN))
+  const [topNScope, setTopNScope] = useState(event.matches)
   const update = (patch) => onSettingsChange((current) => ({ ...current, ...patch }))
 
   const names = useMemo(() => new Map(event.teams.map((t) => [t.teamNumber, t.team?.name ?? ''])), [event.teams])
@@ -154,6 +155,11 @@ export default function SimulationTab({ event, season, ratings, params, settings
         : null,
     [rules, standings, upcoming, ratings, params, runs, seed],
   )
+
+  if (topNScope !== event.matches) {
+    setTopNScope(event.matches)
+    setTopNText(String(Math.min(settings.topN, standings.length)))
+  }
 
   if (!rules) {
     return (

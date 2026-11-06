@@ -147,11 +147,29 @@ describe('runSimulations', () => {
     for (const t of result.teams) expect(Math.abs(t.meanRank - center), `team ${t.teamNumber}`).toBeLessThanOrEqual(0.5)
   })
 
+  it('never swaps two finished teams that tie on RP', () => {
+    const matches = [qual([1, 2], [3, 4], [50, 30]), qual([5, 6], [7, 8], null), qual([5, 7], [6, 8], null)]
+    const replayed = replayRankings(matches, rules)
+    const result = byTeam(simulate(matches, {}, 10000))
+    const tiedPairs = [[1, 2], [3, 4]].map((pair) => pair.sort((a, b) => replayed.find((r) => r.teamNumber === a).rank - replayed.find((r) => r.teamNumber === b).rank))
+    for (const [ahead, behind] of tiedPairs) {
+      expect(replayed.find((r) => r.teamNumber === ahead).rp).toBe(replayed.find((r) => r.teamNumber === behind).rp)
+      let aheadSeen = 0
+      let behindSeen = 0
+      result[ahead].rankCounts.forEach((count, i) => {
+        aheadSeen += count
+        behindSeen += result[behind].rankCounts[i]
+        expect(aheadSeen, `team ${ahead} by rank ${i + 1}`).toBeGreaterThanOrEqual(behindSeen)
+      })
+      expect(result[ahead].meanRank).toBeLessThan(result[behind].meanRank)
+    }
+  })
+
   it('wins a match as often as the site win probability says', () => {
     const rules2024 = RANKING_RULES[2024]
     for (const [r1, r2, b1, b2] of [[56, 56, 56, 56], [70, 60, 55, 30]]) {
       const ratings = { 1: r1, 2: r2, 3: b1, 4: b2 }
-      const result = byTeam(simulate([qual([1, 2], [3, 4], null)], ratings, 20000, { rules: rules2024, rng: mulberry32(2) }))
+      const result = byTeam(simulate([qual([1, 2], [3, 4], null)], ratings, 100000, { rules: rules2024, rng: mulberry32(1) }))
       const winShare = result[1].meanRp / rules2024.winRp
       expect(Math.abs(winShare - calcRedWinProb(r1, r2, b1, b2, params))).toBeLessThanOrEqual(0.01)
     }
