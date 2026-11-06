@@ -1,8 +1,9 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
-import { useParams } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { useEffect, useState, useMemo } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
+import { fetchTeamsByNumber } from '../lib/teams'
 import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
+import TeamSearchBox from '../components/TeamSearchBox'
 import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
 
 // ── Math (same as TeamPage) ───────────────────────────────────────────────────
@@ -31,32 +32,8 @@ function calcRedWinProb(r1, r2, b1, b2, params) {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function TeamPicker({ label, accent, teams, onAdd, onRemove, allTeams, teamsLoading, disabledNums }) {
-  const [search, setSearch] = useState('')
-  const [open, setOpen] = useState(false)
-  const dropdownRef = useRef(null)
+function TeamPicker({ label, accent, teams, onAdd, onRemove, season, disabledNums }) {
   const full = teams.length >= 2
-
-  useEffect(() => {
-    function handleClick(e) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const pool = allTeams.filter((t) => !disabledNums.has(t.team_number))
-    if (!q) return pool.slice(0, 50)
-    return pool
-      .filter(
-        (t) =>
-          String(t.team_number).includes(q) ||
-          (t.team_name ?? '').toLowerCase().includes(q),
-      )
-      .slice(0, 50)
-  }, [allTeams, search, disabledNums])
 
   const colors = {
     red:  { chip: '#f87171', border: 'border-red-800',   bg: 'bg-red-950',  focus: 'focus:border-red-500',  hover: 'hover:bg-red-900/40' },
@@ -102,31 +79,14 @@ function TeamPicker({ label, accent, teams, onAdd, onRemove, allTeams, teamsLoad
 
       {/* Search */}
       {!full && (
-        <div className="relative" ref={dropdownRef}>
-          <input
-            type="text"
-            placeholder={teamsLoading ? 'Loading teams…' : 'Search team…'}
-            value={search}
-            disabled={teamsLoading}
-            onChange={(e) => { setSearch(e.target.value); setOpen(true) }}
-            onFocus={() => setOpen(true)}
-            className={`w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none ${c.focus} transition-colors`}
-          />
-          {open && filtered.length > 0 && (
-            <ul className="absolute z-20 mt-1 w-full max-h-52 overflow-y-auto bg-gray-800 border border-gray-700 rounded-lg shadow-xl">
-              {filtered.map((team) => (
-                <li
-                  key={team.team_number}
-                  onMouseDown={() => { onAdd(team); setSearch(''); setOpen(false) }}
-                  className="px-3 py-2 text-sm cursor-pointer hover:bg-gray-700 transition-colors flex items-center gap-2"
-                >
-                  <span className="text-white font-medium tabular-nums w-14 shrink-0">{team.team_number}</span>
-                  {team.team_name && <span className="text-gray-400 truncate">{team.team_name}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <TeamSearchBox
+          season={season}
+          excluded={disabledNums}
+          onPick={onAdd}
+          placeholder="Search team…"
+          focusClass={c.focus}
+          size="sm"
+        />
       )}
     </div>
   )
@@ -188,74 +148,74 @@ function StatRow({ label, redValues, blueValues }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+const STAT_COLUMNS = 'team_number, team_name, current_epa, current_auto_epa, current_teleop_epa'
+
+function parseTeamNumbers(raw) {
+  const nums = (raw ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0)
+  return [...new Set(nums)].slice(0, 2)
+}
+
 export default function AllianceComparePage() {
   const { season: seasonParam } = useParams()
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
+  return <AllianceView key={season} season={season} />
+}
+
+function AllianceView({ season }) {
   const params = SEASON_PARAMS[season] ?? SEASON_PARAMS[CURRENT_SEASON]
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [teamRows, setTeamRows] = useState({}) // {team_number: {team_name, current_epa, ...}}
 
-  const [allTeams, setAllTeams] = useState([])
-  const [teamsLoading, setTeamsLoading] = useState(true)
-  const [redTeams, setRedTeams] = useState([])
-  const [blueTeams, setBlueTeams] = useState([])
-  const [teamStats, setTeamStats] = useState({})
+  const redNums = useMemo(() => parseTeamNumbers(searchParams.get('red')), [searchParams])
+  const blueNums = useMemo(() => parseTeamNumbers(searchParams.get('blue')), [searchParams])
+  const toTeam = (n) => teamRows[n] ?? { team_number: n }
+  const redTeams = redNums.map(toTeam)
+  const blueTeams = blueNums.map(toTeam)
 
-  useEffect(() => {
-    setRedTeams([])
-    setBlueTeams([])
-    setTeamStats({})
-  }, [season])
+  const missingKey = [...redNums, ...blueNums].filter((n) => !teamRows[n]?.loaded).join(',')
 
   useEffect(() => {
-    setAllTeams([])
-    setTeamsLoading(true)
-    async function fetchTeams() {
-      const BATCH = 1000
-      let from = 0
-      const rows = []
-      while (true) {
-        const { data, error } = await supabase
-          .from(`epa_${season}`)
-          .select('team_number, team_name')
-          .range(from, from + BATCH - 1)
-        if (error) break
-        rows.push(...data)
-        if (data.length < BATCH) break
-        from += BATCH
-      }
-      setAllTeams(rows.sort((a, b) => a.team_number - b.team_number))
-      setTeamsLoading(false)
-    }
-    fetchTeams()
-  }, [season])
+    if (!missingKey) return
+    const wanted = missingKey.split(',').map(Number)
+    let stale = false
+    fetchTeamsByNumber(season, wanted, STAT_COLUMNS)
+      .then((rows) => {
+        if (stale) return
+        setTeamRows((prev) => {
+          const next = { ...prev }
+          for (const n of wanted) next[n] = { team_number: n, ...prev[n], loaded: true }
+          for (const row of rows) next[row.team_number] = { ...row, loaded: true }
+          return next
+        })
+      })
+      .catch((err) => console.error('Failed to load teams', err))
+    return () => { stale = true }
+  }, [season, missingKey])
 
-  async function fetchStats(team) {
-    if (teamStats[team.team_number]) return
-    const { data } = await supabase
-      .from(`epa_${season}`)
-      .select('team_number, current_epa, current_auto_epa, current_teleop_epa')
-      .eq('team_number', team.team_number)
-      .single()
-    if (data) setTeamStats((prev) => ({ ...prev, [data.team_number]: data }))
+  function setAlliance(key, nums) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (nums.length) next.set(key, nums.join(','))
+        else next.delete(key)
+        return next
+      },
+      { replace: true },
+    )
   }
 
-  function addRed(team) {
-    if (redTeams.length >= 2) return
-    setRedTeams((prev) => [...prev, team])
-    fetchStats(team)
+  function addTo(key, nums, team) {
+    if (nums.length >= 2) return
+    setTeamRows((prev) => ({ ...prev, [team.team_number]: { ...team, ...prev[team.team_number] } }))
+    setAlliance(key, [...nums, team.team_number])
   }
 
-  function addBlue(team) {
-    if (blueTeams.length >= 2) return
-    setBlueTeams((prev) => [...prev, team])
-    fetchStats(team)
-  }
+  const addRed = (team) => addTo('red', redNums, team)
+  const addBlue = (team) => addTo('blue', blueNums, team)
 
-  const disabledNums = useMemo(
-    () => new Set([...redTeams, ...blueTeams].map((t) => t.team_number)),
-    [redTeams, blueTeams],
-  )
+  const disabledNums = useMemo(() => new Set([...redNums, ...blueNums]), [redNums, blueNums])
 
-  const getStat = (team, key) => teamStats[team?.team_number]?.[key] ?? null
+  const getStat = (team, key) => teamRows[team?.team_number]?.[key] ?? null
 
   const redEpas  = redTeams.map((t) => getStat(t, 'current_epa'))
   const blueEpas = blueTeams.map((t) => getStat(t, 'current_epa'))
@@ -290,9 +250,8 @@ export default function AllianceComparePage() {
             accent="red"
             teams={redTeams}
             onAdd={addRed}
-            onRemove={(num) => setRedTeams((prev) => prev.filter((t) => t.team_number !== num))}
-            allTeams={allTeams}
-            teamsLoading={teamsLoading}
+            onRemove={(num) => setAlliance('red', redNums.filter((n) => n !== num))}
+            season={season}
             disabledNums={disabledNums}
           />
           <TeamPicker
@@ -300,9 +259,8 @@ export default function AllianceComparePage() {
             accent="blue"
             teams={blueTeams}
             onAdd={addBlue}
-            onRemove={(num) => setBlueTeams((prev) => prev.filter((t) => t.team_number !== num))}
-            allTeams={allTeams}
-            teamsLoading={teamsLoading}
+            onRemove={(num) => setAlliance('blue', blueNums.filter((n) => n !== num))}
+            season={season}
             disabledNums={disabledNums}
           />
         </div>
