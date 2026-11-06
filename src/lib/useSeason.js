@@ -30,8 +30,9 @@ export function useSeason(season) {
     return () => { live = false }
   }, [])
 
-  if (state.error) return { params: null, error: state.error }
-  if (!state.seasons) return { params: null, error: null }
+  if (state.error) return { status: 'missing', params: null, error: state.error }
+  if (!state.seasons) return { status: 'loading', params: null, error: null }
   const params = state.seasons.get(season)
-  return params ? { params, error: null } : { params: null, error: `No parameters found for season ${season}` }
+  if (!params) return { status: 'missing', params: null, error: `No parameters found for season ${season}` }
+  return { status: 'ready', params, error: null }
 }

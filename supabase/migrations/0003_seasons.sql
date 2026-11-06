@@ -13,7 +13,8 @@ create table if not exists seasons (
 alter table seasons enable row level security;
 drop policy if exists anon_select on seasons;
 create policy anon_select on seasons for select to anon using (true);
-revoke insert, update, delete, truncate, trigger, references on seasons from anon, authenticated;
+revoke all on seasons from anon, authenticated;
+grant select on seasons to anon, authenticated;
 
 insert into seasons (season, game_name, mean, a, p, mean_auto, a_auto, p_auto) values
   (2022, 'POWERPLAY',    60.25 / 2,  5.0015, 0.4623, 19.70 / 2, 5.0384, 0.3443),

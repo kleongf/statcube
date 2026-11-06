@@ -194,7 +194,8 @@ function ScoreCell({ scores }) {
   )
 }
 
-function PredCell({ winProb, redPred, bluePred }) {
+function PredCell({ seasonStatus, winProb, redPred, bluePred }) {
+  if (seasonStatus === 'loading') return <span className="text-gray-700 text-sm animate-pulse">…</span>
   if (winProb == null) return <span className="text-gray-600 text-sm">—</span>
   const redPct = Math.round(winProb * 100)
   const bluePct = 100 - redPct
@@ -249,7 +250,7 @@ function TeamsTab({ teams, supabaseData, season }) {
   )
 }
 
-function MatchesTab({ matches, epaLookups, params }) {
+function MatchesTab({ matches, epaLookups, seasonState }) {
   const sorted = [...matches].sort(
     (a, b) => new Date(a.scheduledStartTime) - new Date(b.scheduledStartTime),
   )
@@ -269,7 +270,9 @@ function MatchesTab({ matches, epaLookups, params }) {
         </thead>
         <tbody>
           {sorted.map((m, i) => {
-            const preds = getMatchPredictions(m.teams, m.postResultTime, epaLookups, params)
+            const preds = seasonState.params
+              ? getMatchPredictions(m.teams, m.postResultTime, epaLookups, seasonState.params)
+              : null
             return (
               <tr
                 key={i}
@@ -290,6 +293,7 @@ function MatchesTab({ matches, epaLookups, params }) {
                 </td>
                 <td className="px-5 py-3">
                   <PredCell
+                    seasonStatus={seasonState.status}
                     winProb={preds?.winProb ?? null}
                     redPred={preds?.redPred ?? null}
                     bluePred={preds?.bluePred ?? null}
@@ -424,7 +428,7 @@ export default function EventPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const eventName = location.state?.name
-  const { params, error: seasonError } = useSeason(season)
+  const seasonState = useSeason(season)
 
   const [event, setEvent] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -498,12 +502,6 @@ export default function EventPage() {
           </div>
         )}
 
-        {seasonError && (
-          <div className="bg-red-900/40 border border-red-700 rounded-lg p-4 text-red-300 mb-4 text-sm">
-            {seasonError}
-          </div>
-        )}
-
         {loading && (
           <div className="flex items-center justify-center py-20 text-gray-500">
             Loading event…
@@ -557,12 +555,15 @@ export default function EventPage() {
               />
             )}
 
-            {activeTab === 'matches' && !params && !seasonError && (
-              <div className="text-gray-500 text-sm py-6">Loading matches…</div>
-            )}
-
-            {activeTab === 'matches' && params && (
-              <MatchesTab matches={event.matches} epaLookups={epaLookups} params={params} />
+            {activeTab === 'matches' && (
+              <>
+                {seasonState.error && (
+                  <p className="text-amber-400 text-xs mb-3">
+                    {seasonState.error}. Predictions are unavailable.
+                  </p>
+                )}
+                <MatchesTab matches={event.matches} epaLookups={epaLookups} seasonState={seasonState} />
+              </>
             )}
 
             {activeTab === 'rankings' && (

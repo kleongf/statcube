@@ -41,6 +41,11 @@ class UnknownSeason(Exception):
         super().__init__(f"season {season} has no parameters")
 
 
+class SeasonReadFailed(Exception):
+    def __init__(self, season: int, cause: Exception) -> None:
+        super().__init__(f"could not read season {season} from the seasons table: {cause}")
+
+
 class WriteFailed(Exception):
     pass
 
@@ -104,7 +109,10 @@ class SupabaseStore:
         return cls(client)
 
     def season(self, number: int) -> Season:
-        rows = self._client.table("seasons").select(SEASON_COLUMNS).eq("season", number).execute().data
+        try:
+            rows = self._client.table("seasons").select(SEASON_COLUMNS).eq("season", number).execute().data
+        except (APIError, httpx.TransportError) as exc:
+            raise SeasonReadFailed(number, exc) from exc
         if not rows:
             raise UnknownSeason(number)
         return season_from_row(rows[0])

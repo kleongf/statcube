@@ -4,6 +4,8 @@ import json
 from functools import partial
 from typing import Sequence
 
+from postgrest.exceptions import APIError
+
 import epa
 import ftcscout
 import refresh
@@ -89,6 +91,19 @@ def test_a_season_missing_from_the_seasons_table_exits_2_naming_it_and_fetches_n
     assert "season 2019 has no parameters" in capsys.readouterr().err
 
 
+def test_a_failed_season_read_exits_1_with_one_error_line_and_fetches_nothing(capsys):
+    def fetch_must_not_run(season: epa.Season) -> epa.SeasonMatches:
+        raise AssertionError("fetched")
+
+    denied = APIError({"message": "permission denied for table seasons", "code": "42501"})
+    sink = store.SupabaseStore(FakeClient([denied]))
+
+    code = refresh.main(["run", "--season", "2025"], fetch=fetch_must_not_run, store=sink)
+
+    assert code == 1
+    assert capsys.readouterr().err.splitlines() == ["error: could not read season 2025 from the seasons table: " + str(denied)]
+
+
 def test_a_failed_write_exits_1(raw_events, capsys):
     class FailingStore(RecordingStore):
         def write_ratings(self, season, rows):
@@ -111,6 +126,20 @@ def test_dry_run_reads_parameters_through_the_store_and_writes_the_rows_to_the_g
     rows = json.loads(path.read_text())
     assert len(rows) == 14
     assert {"rank_epa", "rank_auto_epa", "rank_teleop_epa", "current_epa"} <= set(rows[0])
+
+
+def test_dry_run_reads_the_parameters_from_supabase_not_from_a_constant(raw_events, tmp_path, monkeypatch):
+    params_2025 = {"season": 2025, "mean": 50.0, "a": 2.0, "p": 0.6, "mean_auto": 10.0, "a_auto": 2.0, "p_auto": 0.5}
+    client = FakeClient(seasons=[params_2025])
+    monkeypatch.setattr(store.SupabaseStore, "from_env", classmethod(lambda cls, env: cls(client)))
+    path = tmp_path / "rows.json"
+
+    code = refresh.main(["run", "--season", "2025", "--dry-run", str(path)], env={}, fetch=fetch_from(FakePost(raw_events)))
+
+    assert code == 0
+    assert client.selects == [("seasons", {"season": 2025})]
+    assert client.upserts == []
+    assert len(json.loads(path.read_text())) == 14
 
 
 def test_dry_run_needs_the_supabase_variables_because_it_reads_the_parameters(capsys, no_network):

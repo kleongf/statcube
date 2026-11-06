@@ -57,6 +57,26 @@ def test_season_without_a_row_raises_unknown_season_naming_it():
         sut.season(2026)
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [
+        APIError({"message": "Invalid API key", "code": "PGRST301"}),
+        APIError({"message": "Could not find the table 'public.seasons' in the schema cache", "code": "PGRST205"}),
+        APIError({"message": "permission denied for table seasons", "code": "42501"}),
+        APIError({"message": "Service Unavailable", "code": "503"}),
+        httpx.ConnectError("Connection refused"),
+    ],
+    ids=["bad-key", "no-table", "denied", "unavailable", "refused"],
+)
+def test_season_wraps_a_read_failure_in_season_read_failed_naming_the_season_and_cause(failure):
+    sut, _ = make_store(FakeClient([failure]))
+
+    with pytest.raises(store.SeasonReadFailed, match="season 2025") as raised:
+        sut.season(2025)
+
+    assert str(failure) in str(raised.value)
+
+
 def test_write_ratings_upserts_in_batches_of_500_in_team_order():
     client = FakeClient()
     sut, _ = make_store(client)

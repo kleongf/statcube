@@ -73,6 +73,7 @@ class FakeClient:
         self._pending: tuple[list[dict], dict] = ([], {})
         self._filters: dict[str, Any] = {}
         self._selecting = False
+        self._columns: list[str] = []
 
     def table(self, name: str) -> FakeClient:
         self._table = name
@@ -86,6 +87,7 @@ class FakeClient:
 
     def select(self, columns: str) -> FakeClient:
         self._selecting = True
+        self._columns = [c.strip() for c in columns.split(",")]
         return self
 
     def eq(self, column: str, value: Any) -> FakeClient:
@@ -97,7 +99,8 @@ class FakeClient:
             raise self.errors.pop(0)
         if self._selecting:
             self.selects.append((self._table, dict(self._filters)))
-            rows = [r for r in self.seasons if all(r[k] == v for k, v in self._filters.items())]
+            matching = [r for r in self.seasons if all(r[k] == v for k, v in self._filters.items())]
+            rows = [{c: r[c] for c in self._columns} for r in matching]
             return SimpleNamespace(data=rows)
         self.upserts.append((self._table, *self._pending))
         return None

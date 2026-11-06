@@ -11,7 +11,7 @@ from typing import Callable, Mapping, Sequence
 
 import epa
 import ftcscout
-from store import DryRunStore, MaskedKey, MissingEnv, Store, SupabaseStore, UnknownSeason, WriteFailed
+from store import DryRunStore, MaskedKey, MissingEnv, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed
 
 Fetch = Callable[[epa.Season], epa.SeasonMatches]
 
@@ -60,7 +60,6 @@ def main(
     fetch: Fetch | None = None,
     store: Store | None = None,
 ) -> int:
-    """0 on success. 1 on FetchFailed or a failed write. 2 on usage, MissingEnv, MaskedKey, or UnknownSeason."""
     args = _parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -81,7 +80,7 @@ def main(
         for code, message in sorted(exc.failures.items()):
             print(f"  {code}: {message}", file=sys.stderr)
         return 1
-    except WriteFailed as exc:
+    except (SeasonReadFailed, WriteFailed) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(summary)
