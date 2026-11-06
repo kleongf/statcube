@@ -1,12 +1,15 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
-import { useParams } from 'react-router-dom'
+import { useState, useMemo, useEffect } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import { supabase } from '../lib/supabase'
+import { useTeamRows } from '../lib/useTeamRows'
 import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
+import TeamSearchBox from '../components/TeamSearchBox'
+import LoadError from '../components/LoadError'
+import { MAX_COMPARE_TEAMS, dropUnknownTeams, parseCompareTeams, paramsMatch, withTeamParams } from '../lib/teamParams'
 import { CURRENT_SEASON } from '../lib/constants'
 
 const TEAM_COLORS = [
@@ -72,101 +75,52 @@ function CompareTooltip({ active, payload, selected }) {
   )
 }
 
+const EPA_COLUMNS = 'team_number, team_name, epa, auto_epa, teleop_epa'
+
 export default function ComparePage() {
   const { season: seasonParam } = useParams()
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
+  return <CompareView key={season} season={season} />
+}
 
-  const [allTeams, setAllTeams]     = useState([])
-  const [teamsLoading, setTeamsLoading] = useState(true)
+function CompareView({ season }) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [metric, setMetric] = useState('epa')
 
-  const [selected, setSelected]     = useState([]) // [{team_number, team_name}]
-  const [epaData, setEpaData]       = useState({}) // {team_number: {epa, auto_epa, teleop_epa}}
+  const requested = useMemo(
+    () => parseCompareTeams(searchParams.get('teams')),
+    [searchParams],
+  )
+  const { rows: teamRows, seed, failed, retry } = useTeamRows(season, requested, EPA_COLUMNS)
+  const teamNumbers = useMemo(() => dropUnknownTeams(requested, teamRows), [requested, teamRows])
+  const selected = teamNumbers.map((n) => teamRows[n] ?? { team_number: n })
 
-  const [metric, setMetric]         = useState('epa')
-  const [search, setSearch]         = useState('')
-  const [open, setOpen]             = useState(false)
-  const dropdownRef                 = useRef(null)
-
-  // Reset when season changes
   useEffect(() => {
-    setSelected([])
-    setEpaData({})
-  }, [season])
-
-  // Fetch team list for the season
-  useEffect(() => {
-    setAllTeams([])
-    setTeamsLoading(true)
-    async function fetchTeams() {
-      const BATCH = 1000
-      let from = 0
-      const rows = []
-      while (true) {
-        const { data, error } = await supabase
-          .from(`epa_${season}`)
-          .select('team_number, team_name')
-          .range(from, from + BATCH - 1)
-        if (error) break
-        rows.push(...data)
-        if (data.length < BATCH) break
-        from += BATCH
-      }
-      setAllTeams(rows.sort((a, b) => a.team_number - b.team_number))
-      setTeamsLoading(false)
+    if (!paramsMatch(searchParams, { teams: teamNumbers })) {
+      setSearchParams((prev) => withTeamParams(prev, { teams: teamNumbers }), { replace: true })
     }
-    fetchTeams()
-  }, [season])
+  }, [searchParams, setSearchParams, teamNumbers])
 
-  // Close dropdown on outside click
-  useEffect(() => {
-    function handleClick(e) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
+  const full = teamNumbers.length >= MAX_COMPARE_TEAMS
 
-  async function addTeam(team) {
-    if (selected.some((t) => t.team_number === team.team_number)) return
-    setSelected((prev) => [...prev, team])
-    setSearch('')
-    setOpen(false)
+  function setTeams(nums) {
+    setSearchParams((prev) => withTeamParams(prev, { teams: nums }))
+  }
 
-    if (epaData[team.team_number]) return
-    const { data } = await supabase
-      .from(`epa_${season}`)
-      .select('team_number, epa, auto_epa, teleop_epa')
-      .eq('team_number', team.team_number)
-      .single()
-    if (data) setEpaData((prev) => ({ ...prev, [data.team_number]: data }))
+  function addTeam(team) {
+    if (full || teamNumbers.includes(team.team_number)) return
+    seed(team)
+    setTeams([...teamNumbers, team.team_number])
   }
 
   function removeTeam(num) {
-    setSelected((prev) => prev.filter((t) => t.team_number !== num))
+    setTeams(teamNumbers.filter((n) => n !== num))
   }
 
-  const filteredTeams = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const selectedNums = new Set(selected.map((t) => t.team_number))
-    const pool = allTeams.filter((t) => !selectedNums.has(t.team_number))
-    if (!q) return pool.slice(0, 50)
-    return pool
-      .filter(
-        (t) =>
-          String(t.team_number).includes(q) ||
-          (t.team_name ?? '').toLowerCase().includes(q),
-      )
-      .slice(0, 50)
-  }, [allTeams, search, selected])
-
-  const teamNumbers = selected.map((t) => t.team_number)
-
   const chartData = useMemo(() => {
-    if (selected.length === 0) return []
-    return buildChartData(epaData, teamNumbers, metric)
-  }, [selected, epaData, metric])
+    if (teamNumbers.length === 0) return []
+    return buildChartData(teamRows, teamNumbers, metric)
+  }, [teamRows, teamNumbers, metric])
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
@@ -180,9 +134,7 @@ export default function ComparePage() {
           {season}/{season + 1} season · Compare EPA metrics over time
         </p>
 
-        {/* Team picker */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-5">
-          {/* Selected chips */}
           {selected.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-4">
               {selected.map((team, i) => {
@@ -214,41 +166,21 @@ export default function ComparePage() {
             </div>
           )}
 
-          {/* Search input + dropdown */}
-          <div className="relative" ref={dropdownRef}>
-            <input
-              type="text"
-              placeholder={
-                teamsLoading ? 'Loading teams…' : 'Search team name or number to add…'
-              }
-              value={search}
-              disabled={teamsLoading}
-              onChange={(e) => { setSearch(e.target.value); setOpen(true) }}
-              onFocus={() => setOpen(true)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+          {full ? (
+            <p className="text-sm text-gray-500">
+              Up to {MAX_COMPARE_TEAMS} teams. Remove one to add another.
+            </p>
+          ) : (
+            <TeamSearchBox
+              season={season}
+              excluded={new Set(teamNumbers)}
+              onPick={addTeam}
             />
-            {open && filteredTeams.length > 0 && (
-              <ul className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto bg-gray-800 border border-gray-700 rounded-lg shadow-xl">
-                {filteredTeams.map((team) => (
-                  <li
-                    key={team.team_number}
-                    onMouseDown={() => addTeam(team)}
-                    className="px-4 py-2 text-sm cursor-pointer hover:bg-gray-700 transition-colors flex items-center gap-2"
-                  >
-                    <span className="text-white font-medium tabular-nums w-16 shrink-0">
-                      {team.team_number}
-                    </span>
-                    {team.team_name && (
-                      <span className="text-gray-400 truncate">{team.team_name}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          )}
         </div>
 
-        {/* Metric selector */}
+        {failed && <LoadError onRetry={retry} />}
+
         <div className="flex items-center gap-3 mb-6">
           <span className="text-sm text-gray-400 shrink-0">Metric</span>
           <div className="flex gap-1">
@@ -268,7 +200,6 @@ export default function ComparePage() {
           </div>
         </div>
 
-        {/* Chart */}
         {selected.length === 0 ? (
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-16 text-center text-gray-500">
             Select at least one team to compare
@@ -300,7 +231,7 @@ export default function ComparePage() {
                 <Tooltip content={<CompareTooltip selected={selected} />} />
                 <Legend wrapperStyle={{ paddingTop: 16, fontSize: 13, color: '#9ca3af' }} />
                 {selected.map((team, i) =>
-                  epaData[team.team_number] ? (
+                  teamRows[team.team_number]?.epa ? (
                     <Line
                       key={team.team_number}
                       type="monotone"
