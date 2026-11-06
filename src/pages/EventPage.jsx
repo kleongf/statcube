@@ -5,52 +5,9 @@ import { ftcscoutQuery } from '../lib/ftcscout'
 import { supabase } from '../lib/supabase'
 import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
 import SortableTeamsTable from '../components/SortableTeamsTable'
+import SimulationTab from '../components/SimulationTab'
+import { getEventQuery } from '../lib/eventQuery'
 
-
-function getEventQuery(season) {
-  return `
-    query EventByCode($season: Int!, $code: String!) {
-      eventByCode(season: $season, code: $code) {
-        location { city country state }
-        start
-        end
-        code
-        matches {
-          matchNum
-          scheduledStartTime
-          postResultTime
-          teams {
-            teamNumber
-            onField
-            alliance
-          }
-          scores {
-            ... on MatchScores${season} {
-              red { totalPoints }
-              blue { totalPoints }
-            }
-          }
-        }
-        teams {
-          teamNumber
-          team { name number }
-          stats {
-            ... on TeamEventStats${season} {
-              qualMatchesPlayed
-              rank
-              rp
-              tb1
-              tb2
-              wins
-              losses
-              ties
-            }
-          }
-        }
-      }
-    }
-  `
-}
 
 // ── Math ─────────────────────────────────────────────────────────────────────
 
@@ -435,6 +392,15 @@ export default function EventPage() {
 
   const [activeTab, setActiveTab] = useState('teams')
 
+  const params = SEASON_PARAMS[season] ?? SEASON_PARAMS[2025]
+  const ratings = useMemo(() => {
+    const latest = new Map()
+    for (const [team, entries] of Object.entries(epaLookups)) {
+      if (entries.length > 0) latest.set(Number(team), entries[entries.length - 1].value)
+    }
+    return latest
+  }, [epaLookups])
+
   useEffect(() => {
     async function fetchEvent() {
       try {
@@ -539,6 +505,11 @@ export default function EventPage() {
                 active={activeTab === 'rankings'}
                 onClick={() => setActiveTab('rankings')}
               />
+              <TabButton
+                label="Simulation"
+                active={activeTab === 'simulation'}
+                onClick={() => setActiveTab('simulation')}
+              />
             </div>
 
             {activeTab === 'teams' && (
@@ -550,11 +521,15 @@ export default function EventPage() {
             )}
 
             {activeTab === 'matches' && (
-              <MatchesTab matches={event.matches} epaLookups={epaLookups} params={SEASON_PARAMS[season] ?? SEASON_PARAMS[2025]} />
+              <MatchesTab matches={event.matches} epaLookups={epaLookups} params={params} />
             )}
 
             {activeTab === 'rankings' && (
               <RankingsTab teams={event.teams} />
+            )}
+
+            {activeTab === 'simulation' && (
+              <SimulationTab event={event} season={season} ratings={ratings} params={params} />
             )}
           </>
         )}
