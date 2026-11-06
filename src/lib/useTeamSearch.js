@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { searchTeams } from './teams'
 
-export const SEARCH_DEBOUNCE_MS = 250
+const SEARCH_DEBOUNCE_MS = 250
 
 export function useTeamSearch(season, query) {
   const q = query.trim()

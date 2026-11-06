@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 
 const PICKER_COLUMNS = 'team_number, team_name'
 
-export function applyTeamFilter(query, search) {
+function applyTeamFilter(query, search) {
   const q = search.trim()
   if (!q) return query
   if (/^\d+$/.test(q)) return query.eq('team_number', Number(q))
