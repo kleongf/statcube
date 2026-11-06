@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+import traceback
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -60,7 +61,7 @@ def main(
     fetch: Fetch | None = None,
     store: Store | None = None,
 ) -> int:
-    """0 on success. 1 on FetchFailed, a failed season read, or a failed write. 2 on usage, MissingEnv, InvalidEnv, or UnknownSeason."""
+    """0 on success. 1 on FetchFailed, a failed read or write, or any other error. 2 on usage, MissingEnv, InvalidEnv, or UnknownSeason."""
     args = _parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -88,6 +89,9 @@ def main(
         return 1
     except (SeasonReadFailed, WriteFailed) as exc:
         fail(f"error: {exc}")
+        return 1
+    except Exception:
+        fail(traceback.format_exc().rstrip())
         return 1
     print(summary)
     return 0

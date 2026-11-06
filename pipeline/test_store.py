@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 import pytest
@@ -223,3 +224,92 @@ def test_dry_run_store_serves_seasons_from_its_reader(tmp_path):
     assert sut.season(2025) == SEASON_2025
     with pytest.raises(store.UnknownSeason, match="2019"):
         sut.season(2019)
+
+
+SEASON_ROW = {"season": 2025, "mean": 56.65, "a": 2.1482, "p": 0.6543, "mean_auto": 12.665, "a_auto": 2.4555, "p_auto": 0.5535}
+
+
+def replies(*responses: httpx.Response) -> tuple[httpx.MockTransport, list[httpx.Request]]:
+    seen: list[httpx.Request] = []
+    queue = list(responses)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    return httpx.MockTransport(handle), seen
+
+
+class UnreadStream(httpx.SyncByteStream):
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def __iter__(self):
+        yield self.body
+
+
+@pytest.fixture
+def postgrest_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    return sleeps
+
+
+def test_season_recovers_from_a_transient_503_through_the_shared_client(postgrest_sleeps):
+    transport, seen = replies(
+        httpx.Response(503, json={"code": "PGRST002", "message": "schema cache"}),
+        httpx.Response(200, json=[SEASON_ROW]),
+    )
+    sut, _ = real_store(transport)
+
+    assert sut.season(2025).number == 2025
+    assert len(seen) == 2
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        httpx.Response(503, json={"code": "PGRST002", "message": "schema cache"}),
+        httpx.Response(500, json={"code": "57014", "message": "statement timeout"}),
+        httpx.Response(401, json={"code": "PGRST301", "message": "JWT expired"}),
+        httpx.Response(200, text="<html>captive portal</html>", headers={"content-type": HTML}),
+        httpx.Response(200, text="null", headers={"content-type": JSON}),
+        httpx.Response(200, json=[{"season": 2025}]),
+        httpx.Response(200, stream=UnreadStream(b"not gzip"), headers={"content-type": JSON, "content-encoding": "gzip"}),
+    ],
+    ids=["503-always", "500-json", "401", "html-200", "null-200", "row-missing-columns", "bad-gzip"],
+)
+def test_season_turns_any_bad_reply_through_the_shared_client_into_season_read_failed(reply, postgrest_sleeps):
+    transport, _ = replies(reply)
+    sut, _ = real_store(transport)
+
+    with pytest.raises(store.SeasonReadFailed, match="season 2025"):
+        sut.season(2025)
+
+
+def test_write_ratings_retries_a_5xx_whose_body_arrives_as_a_stream():
+    transport, seen = replies(
+        httpx.Response(503, stream=UnreadStream(b'{"code":"PGRST002","message":"schema cache"}'), headers={"content-type": JSON}),
+        httpx.Response(201, json=[]),
+    )
+    sut, sleeps = real_store(transport)
+
+    sut.write_ratings(2025, [team_row(1)])
+
+    assert len(seen) == 2
+    assert sleeps == [1]
+
+
+@pytest.mark.parametrize("url", ["https://x.supabase.co:99999", "http://127.0.0.1:abc/ok", "http://[::1/ok", "https://", "http:///x"])
+def test_from_env_rejects_a_url_that_cannot_be_parsed_as_invalid_env(url, no_network):
+    with pytest.raises(store.InvalidEnv, match="SUPABASE_URL"):
+        store.SupabaseStore.from_env({**ENV, "SUPABASE_URL": url})
+
+    assert no_network == []
+
+
+def test_from_env_accepts_the_scheme_in_any_case(no_network):
+    sut = store.SupabaseStore.from_env({**ENV, "SUPABASE_URL": "HTTPS://example.supabase.co"})
+
+    assert isinstance(sut, store.SupabaseStore)
+    assert no_network == []

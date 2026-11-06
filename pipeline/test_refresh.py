@@ -4,6 +4,7 @@ import json
 from functools import partial
 from typing import Sequence
 
+import httpx
 import pytest
 from postgrest.exceptions import APIError
 
@@ -83,6 +84,9 @@ URL = "https://example.supabase.co"
         ("SUPABASE_SECRET_KEY", URL, " " + KEY),
         ("SUPABASE_URL", "example.supabase.co", KEY),
         ("SUPABASE_URL", URL + "\n", KEY),
+        ("SUPABASE_URL", "https://x.supabase.co:99999", KEY),
+        ("SUPABASE_URL", "http://127.0.0.1:abc/ok", KEY),
+        ("SUPABASE_URL", "http://[::1/ok", KEY),
     ],
 )
 def test_a_malformed_credential_exits_2_naming_it_without_echoing_the_key_or_calling_out(name, url, key, capsys, no_network):
@@ -164,3 +168,27 @@ def test_dry_run_needs_the_supabase_variables_because_it_reads_the_parameters(ca
     assert code == 2
     assert "SUPABASE_URL, SUPABASE_SECRET_KEY" in capsys.readouterr().err
     assert no_network == []
+
+
+def test_an_unexpected_store_error_exits_1_without_printing_the_key(capsys):
+    class LeakyStore(RecordingStore):
+        def season(self, number):
+            raise RuntimeError(f"upstream said: Authorization: Bearer {KEY}")
+
+    code = refresh.main(["run", "--season", "2025"], env={"SUPABASE_SECRET_KEY": KEY}, store=LeakyStore())
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "RuntimeError" in err
+    assert "Bearer ***" in err
+    assert KEY not in err
+
+
+def test_an_html_page_on_a_200_seasons_read_exits_1_with_one_line(capsys):
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text="<html>portal</html>", headers={"content-type": "text/html"}))
+    sink = store.SupabaseStore.from_env({"SUPABASE_URL": URL, "SUPABASE_SECRET_KEY": KEY}, transport=transport)
+
+    code = refresh.main(["run", "--season", "2025"], env={"SUPABASE_SECRET_KEY": KEY}, store=sink)
+
+    assert code == 1
+    assert capsys.readouterr().err.splitlines() == ["error: could not read season 2025 from the seasons table: expected a JSON array, got str"]

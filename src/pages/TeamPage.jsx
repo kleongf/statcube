@@ -558,12 +558,6 @@ export default function TeamPage() {
                 </div>
               )}
 
-              {seasonState.error && (
-                <p className="text-amber-400 text-xs mb-3">
-                  {seasonState.error}. Predictions are unavailable.
-                </p>
-              )}
-
               {!matchesLoading && !matchesError && matchEvents.length === 0 && (
                 <div className="bg-gray-900 rounded-xl border border-gray-800 p-10 text-center text-gray-500">
                   No matches found for this season.
@@ -572,6 +566,11 @@ export default function TeamPage() {
 
               {!matchesLoading && matchEvents.length > 0 && (
                 <div className="flex flex-col gap-5">
+                  {seasonState.error && (
+                    <p className="text-amber-400 text-xs">
+                      {seasonState.error}. Predictions are unavailable.
+                    </p>
+                  )}
                   {matchEvents.map(([eventCode, matches]) => (
                     <EventMatchTable
                       key={eventCode}
