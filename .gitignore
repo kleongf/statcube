@@ -23,10 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
-# Local reference scripts, never tracked
 stats/
-
-# Pipeline Python environment
+supabase/.temp/
 pipeline/.venv/
 pipeline/**/__pycache__/
 .pytest_cache/

@@ -1,5 +1,3 @@
--- Column types are inferred from one sample row and not confirmed against production.
-
 create table if not exists epa_2022 (
   team_number integer primary key,
   team_name text,
