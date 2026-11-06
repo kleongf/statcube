@@ -85,7 +85,7 @@ export default function ComparePage() {
 
 function CompareView({ season }) {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [metric, setMetric]     = useState('epa')
+  const [metric, setMetric] = useState('epa')
 
   const teamNumbers = useMemo(
     () => parseCompareTeams(searchParams.get('teams')),

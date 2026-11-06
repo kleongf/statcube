@@ -167,6 +167,8 @@ function AllianceView({ season }) {
     }
   }, [searchParams, setSearchParams, redNums, blueNums])
 
+  const disabledNums = new Set([...redNums, ...blueNums])
+
   function setAlliance(key, nums) {
     setSearchParams((prev) => withTeamParams(prev, { [key]: nums }))
   }
@@ -179,8 +181,6 @@ function AllianceView({ season }) {
 
   const addRed = (team) => addTo('red', redNums, team)
   const addBlue = (team) => addTo('blue', blueNums, team)
-
-  const disabledNums = new Set([...redNums, ...blueNums])
 
   const getStat = (team, key) => teamRows[team?.team_number]?.[key] ?? null
 
