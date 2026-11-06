@@ -1,10 +1,10 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import { fetchTeamsByNumber } from '../lib/teams'
+import { useTeamRows } from '../lib/useTeamRows'
 import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
 import TeamSearchBox from '../components/TeamSearchBox'
@@ -88,33 +88,14 @@ export default function ComparePage() {
 
 function CompareView({ season }) {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [teamRows, setTeamRows] = useState({}) // {team_number: {team_name, epa, auto_epa, teleop_epa}}
   const [metric, setMetric]     = useState('epa')
 
   const teamNumbers = useMemo(
     () => parseTeamNumbers(searchParams.get('teams')),
     [searchParams],
   )
+  const { rows: teamRows, seed } = useTeamRows(season, teamNumbers, EPA_COLUMNS)
   const selected = teamNumbers.map((n) => teamRows[n] ?? { team_number: n })
-  const missingKey = teamNumbers.filter((n) => !teamRows[n]?.loaded).join(',')
-
-  useEffect(() => {
-    if (!missingKey) return
-    const wanted = missingKey.split(',').map(Number)
-    let stale = false
-    fetchTeamsByNumber(season, wanted, EPA_COLUMNS)
-      .then((rows) => {
-        if (stale) return
-        setTeamRows((prev) => {
-          const next = { ...prev }
-          for (const n of wanted) next[n] = { team_number: n, ...prev[n], loaded: true }
-          for (const row of rows) next[row.team_number] = { ...row, loaded: true }
-          return next
-        })
-      })
-      .catch((err) => console.error('Failed to load teams', err))
-    return () => { stale = true }
-  }, [season, missingKey])
 
   function setTeams(nums) {
     setSearchParams(
@@ -130,7 +111,7 @@ function CompareView({ season }) {
 
   function addTeam(team) {
     if (teamNumbers.includes(team.team_number)) return
-    setTeamRows((prev) => ({ ...prev, [team.team_number]: { ...team, ...prev[team.team_number] } }))
+    seed(team)
     setTeams([...teamNumbers, team.team_number])
   }
 

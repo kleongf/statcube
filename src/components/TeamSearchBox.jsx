@@ -91,7 +91,7 @@ export default function TeamSearchBox({
               role="option"
               aria-selected={i === highlighted}
               onMouseDown={() => pick(team)}
-              onMouseEnter={() => setActive(i)}
+              onMouseMove={() => setActive(i)}
               className={`${s.item} text-sm cursor-pointer transition-colors flex items-center gap-2 ${
                 i === highlighted ? 'bg-gray-700' : ''
               }`}

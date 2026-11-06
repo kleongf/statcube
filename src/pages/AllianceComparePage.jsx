@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { fetchTeamsByNumber } from '../lib/teams'
+import { useTeamRows } from '../lib/useTeamRows'
 import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
 import TeamSearchBox from '../components/TeamSearchBox'
@@ -164,33 +164,13 @@ export default function AllianceComparePage() {
 function AllianceView({ season }) {
   const params = SEASON_PARAMS[season] ?? SEASON_PARAMS[CURRENT_SEASON]
   const [searchParams, setSearchParams] = useSearchParams()
-  const [teamRows, setTeamRows] = useState({}) // {team_number: {team_name, current_epa, ...}}
 
   const redNums = useMemo(() => parseTeamNumbers(searchParams.get('red')), [searchParams])
   const blueNums = useMemo(() => parseTeamNumbers(searchParams.get('blue')), [searchParams])
+  const { rows: teamRows, seed } = useTeamRows(season, [...redNums, ...blueNums], STAT_COLUMNS)
   const toTeam = (n) => teamRows[n] ?? { team_number: n }
   const redTeams = redNums.map(toTeam)
   const blueTeams = blueNums.map(toTeam)
-
-  const missingKey = [...redNums, ...blueNums].filter((n) => !teamRows[n]?.loaded).join(',')
-
-  useEffect(() => {
-    if (!missingKey) return
-    const wanted = missingKey.split(',').map(Number)
-    let stale = false
-    fetchTeamsByNumber(season, wanted, STAT_COLUMNS)
-      .then((rows) => {
-        if (stale) return
-        setTeamRows((prev) => {
-          const next = { ...prev }
-          for (const n of wanted) next[n] = { team_number: n, ...prev[n], loaded: true }
-          for (const row of rows) next[row.team_number] = { ...row, loaded: true }
-          return next
-        })
-      })
-      .catch((err) => console.error('Failed to load teams', err))
-    return () => { stale = true }
-  }, [season, missingKey])
 
   function setAlliance(key, nums) {
     setSearchParams(
@@ -206,7 +186,7 @@ function AllianceView({ season }) {
 
   function addTo(key, nums, team) {
     if (nums.length >= 2) return
-    setTeamRows((prev) => ({ ...prev, [team.team_number]: { ...team, ...prev[team.team_number] } }))
+    seed(team)
     setAlliance(key, [...nums, team.team_number])
   }
 
@@ -225,7 +205,9 @@ function AllianceView({ season }) {
   const blueTeleopEpas = blueTeams.map((t) => getStat(t, 'current_teleop_epa'))
 
   const showComparison = redTeams.length > 0 || blueTeams.length > 0
-  const showWinProb = redTeams.length > 0 && blueTeams.length > 0
+  const showWinProb =
+    redTeams.length > 0 && blueTeams.length > 0 &&
+    [...redTeams, ...blueTeams].every((t) => t.loaded)
 
   const winProb = showWinProb
     ? calcRedWinProb(redEpas[0], redEpas[1] ?? null, blueEpas[0], blueEpas[1] ?? null, params)
