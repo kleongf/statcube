@@ -122,7 +122,7 @@ export default function SimulationTab({ event, season, ratings, params }) {
   const upcoming = useMemo(() => upcomingMatches(event.matches), [event.matches])
   const result = useMemo(
     () =>
-      rules && upcoming.length > 0 && standings.length > 0
+      upcoming.length > 0 && standings.length > 0
         ? runSimulations({ standings, upcoming, ratings, params, rules, runs, rng: mulberry32(seed) })
         : null,
     [rules, standings, upcoming, ratings, params, runs, seed],
