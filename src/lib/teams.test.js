@@ -26,21 +26,75 @@ beforeEach(() => {
   )
 })
 
+const orFilter = () => lastRequest().searchParams.get('or')
+
 describe('searchTeams', () => {
-  it('matches a numeric query on team_number by equality', async () => {
-    const rows = await searchTeams(2025, '11115')
+  it('matches a numeric query as a team number prefix or a name substring', async () => {
+    const rows = await searchTeams(2025, '162')
     const url = lastRequest()
     expect(url.pathname).toBe('/rest/v1/epa_2025')
-    expect(url.searchParams.get('team_number')).toBe('eq.11115')
-    expect(url.searchParams.has('team_name')).toBe(false)
+    expect(url.searchParams.get('or')).toBe(
+      '(team_number.eq.162,' +
+        'and(team_number.gte.1620,team_number.lte.1629),' +
+        'and(team_number.gte.16200,team_number.lte.16299),' +
+        'and(team_number.gte.162000,team_number.lte.162999),' +
+        'and(team_number.gte.1620000,team_number.lte.1629999),' +
+        'and(team_number.gte.16200000,team_number.lte.16299999),' +
+        'and(team_number.gte.162000000,team_number.lte.162999999),' +
+        'and(team_number.gte.1620000000,team_number.lte.1629999999),' +
+        'team_name.imatch."162")',
+    )
+    expect(url.searchParams.get('order')).toBe('team_number.asc')
     expect(rows).toEqual([{ team_number: 111, team_name: 'Wild Bots' }])
   })
 
-  it('matches any other query on team_name with ilike', async () => {
+  it('stops the prefix ranges at the int4 maximum', async () => {
+    await searchTeams(2025, '214')
+    expect(orFilter()).toContain('and(team_number.gte.2140000000,team_number.lte.2147483647)')
+    expect(orFilter()).not.toContain('team_number.gte.21400000000')
+
+    await searchTeams(2025, '2147')
+    expect(orFilter()).toContain('and(team_number.gte.2147000000,team_number.lte.2147483647)')
+  })
+
+  it('accepts the largest int4 and drops the number clause above it', async () => {
+    await searchTeams(2025, '2147483647')
+    expect(orFilter()).toBe('(team_number.eq.2147483647,team_name.imatch."2147483647")')
+
+    await searchTeams(2025, '2147483648')
+    expect(orFilter()).toBe('(team_name.imatch."2147483648")')
+
+    await searchTeams(2025, '99999999999999999999')
+    expect(orFilter()).toBe('(team_name.imatch."99999999999999999999")')
+  })
+
+  it('searches only names when the digits have a leading zero', async () => {
+    await searchTeams(2025, '007')
+    expect(orFilter()).toBe('(team_name.imatch."007")')
+  })
+
+  it('searches only names for a non-numeric query', async () => {
     await searchTeams(2025, 'robot')
-    const url = lastRequest()
-    expect(url.searchParams.get('team_name')).toBe('ilike.%robot%')
-    expect(url.searchParams.has('team_number')).toBe(false)
+    expect(orFilter()).toBe('(team_name.imatch."robot")')
+    expect(lastRequest().searchParams.has('team_number')).toBe(false)
+  })
+
+  it('sends the query trimmed', async () => {
+    await searchTeams(2025, '  robot ')
+    expect(orFilter()).toBe('(team_name.imatch."robot")')
+  })
+
+  it.each([
+    ['*', '\\\\*'],
+    ['%', '%'],
+    ['_', '_'],
+    ['\\', '\\\\\\\\'],
+    ['a.b', 'a\\\\.b'],
+    ['(x|y)', '\\\\(x\\\\|y\\\\)'],
+    ['say "hi"', 'say \\"hi\\"'],
+  ])('matches %j as literal text', async (query, quoted) => {
+    await searchTeams(2025, query)
+    expect(orFilter()).toBe(`(team_name.imatch."${quoted}")`)
   })
 
   it('sends one request with limit=10 by default', async () => {
@@ -50,16 +104,23 @@ describe('searchTeams', () => {
   })
 
   it('honours an explicit limit and requests only the picker columns', async () => {
-    await searchTeams(2024, 'bot', 5)
+    await searchTeams(2024, 'bot', { limit: 5 })
     const url = lastRequest()
     expect(url.pathname).toBe('/rest/v1/epa_2024')
     expect(url.searchParams.get('limit')).toBe('5')
     expect(url.searchParams.get('select')).toBe('team_number,team_name')
   })
 
-  it('treats LIKE wildcards in the query as literal text', async () => {
-    await searchTeams(2025, '100%_a')
-    expect(lastRequest().searchParams.get('team_name')).toBe('ilike.%100\\%\\_a%')
+  it('excludes picked teams in the query itself', async () => {
+    await searchTeams(2025, 'robot', { exclude: [16, 25] })
+    const url = lastRequest()
+    expect(url.searchParams.get('team_number')).toBe('not.in.(16,25)')
+    expect(url.searchParams.get('limit')).toBe('10')
+  })
+
+  it('adds no exclusion filter when nothing is picked', async () => {
+    await searchTeams(2025, 'robot')
+    expect(lastRequest().searchParams.has('team_number')).toBe(false)
   })
 
   it('sends no request for a blank query', async () => {

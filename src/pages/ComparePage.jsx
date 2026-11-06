@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -8,6 +8,8 @@ import { useTeamRows } from '../lib/useTeamRows'
 import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
 import TeamSearchBox from '../components/TeamSearchBox'
+import LoadError from '../components/LoadError'
+import { MAX_COMPARE_TEAMS, parseCompareTeams, paramsMatch, withTeamParams } from '../lib/teamParams'
 import { CURRENT_SEASON } from '../lib/constants'
 
 const TEAM_COLORS = [
@@ -75,11 +77,6 @@ function CompareTooltip({ active, payload, selected }) {
 
 const EPA_COLUMNS = 'team_number, team_name, epa, auto_epa, teleop_epa'
 
-function parseTeamNumbers(raw) {
-  const nums = (raw ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0)
-  return [...new Set(nums)]
-}
-
 export default function ComparePage() {
   const { season: seasonParam } = useParams()
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
@@ -91,26 +88,26 @@ function CompareView({ season }) {
   const [metric, setMetric]     = useState('epa')
 
   const teamNumbers = useMemo(
-    () => parseTeamNumbers(searchParams.get('teams')),
+    () => parseCompareTeams(searchParams.get('teams')),
     [searchParams],
   )
-  const { rows: teamRows, seed } = useTeamRows(season, teamNumbers, EPA_COLUMNS)
+  const { rows: teamRows, seed, failed, retry } = useTeamRows(season, teamNumbers, EPA_COLUMNS)
   const selected = teamNumbers.map((n) => teamRows[n] ?? { team_number: n })
 
+  useEffect(() => {
+    if (!paramsMatch(searchParams, { teams: teamNumbers })) {
+      setSearchParams((prev) => withTeamParams(prev, { teams: teamNumbers }), { replace: true })
+    }
+  }, [searchParams, setSearchParams, teamNumbers])
+
+  const full = teamNumbers.length >= MAX_COMPARE_TEAMS
+
   function setTeams(nums) {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev)
-        if (nums.length) next.set('teams', nums.join(','))
-        else next.delete('teams')
-        return next
-      },
-      { replace: true },
-    )
+    setSearchParams((prev) => withTeamParams(prev, { teams: nums }))
   }
 
   function addTeam(team) {
-    if (teamNumbers.includes(team.team_number)) return
+    if (full || teamNumbers.includes(team.team_number)) return
     seed(team)
     setTeams([...teamNumbers, team.team_number])
   }
@@ -170,12 +167,20 @@ function CompareView({ season }) {
             </div>
           )}
 
-          <TeamSearchBox
-            season={season}
-            excluded={new Set(teamNumbers)}
-            onPick={addTeam}
-          />
+          {full ? (
+            <p className="text-sm text-gray-500">
+              Up to {MAX_COMPARE_TEAMS} teams. Remove one to add another.
+            </p>
+          ) : (
+            <TeamSearchBox
+              season={season}
+              excluded={new Set(teamNumbers)}
+              onPick={addTeam}
+            />
+          )}
         </div>
+
+        {failed && <LoadError onRetry={retry} />}
 
         {/* Metric selector */}
         <div className="flex items-center gap-3 mb-6">

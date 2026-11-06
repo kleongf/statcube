@@ -21,8 +21,9 @@ export default function TeamSearchBox({
   const listId = useId()
   const s = SIZES[size]
 
-  const { results, searched } = useTeamSearch(season, search)
+  const { results, status, flush } = useTeamSearch(season, search, excluded)
   const suggestions = results.filter((t) => !excluded.has(t.team_number))
+  const searching = status === 'pending'
   const highlighted = Math.min(active, suggestions.length - 1)
 
   useEffect(() => {
@@ -44,6 +45,13 @@ export default function TeamSearchBox({
       setOpen(false)
       return
     }
+    if (e.key === 'Enter' && open && searching) {
+      e.preventDefault()
+      flush().then((found) => {
+        if (found?.length) pick(found[0])
+      })
+      return
+    }
     if (!suggestions.length) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -60,7 +68,8 @@ export default function TeamSearchBox({
   }
 
   const showList = open && suggestions.length > 0
-  const showEmpty = open && searched && suggestions.length === 0
+  const showStatus = open && (searching || (status === 'settled' && suggestions.length === 0))
+  const statusText = searching ? 'Searching…' : 'No teams match'
 
   return (
     <div className="relative" ref={rootRef}>
@@ -78,37 +87,42 @@ export default function TeamSearchBox({
         onKeyDown={handleKeyDown}
         className={`w-full bg-gray-800 border border-gray-700 rounded-lg ${s.input} text-sm text-gray-100 placeholder-gray-500 focus:outline-none ${focusClass} transition-colors`}
       />
-      {showList && (
-        <ul
-          id={listId}
-          role="listbox"
-          className={`absolute z-20 mt-1 w-full ${s.list} overflow-y-auto bg-gray-800 border border-gray-700 rounded-lg shadow-xl`}
-        >
-          {suggestions.map((team, i) => (
-            <li
-              key={team.team_number}
-              id={`${listId}-${i}`}
-              role="option"
-              aria-selected={i === highlighted}
-              onMouseDown={() => pick(team)}
-              onMouseMove={() => setActive(i)}
-              className={`${s.item} text-sm cursor-pointer transition-colors flex items-center gap-2 ${
-                i === highlighted ? 'bg-gray-700' : ''
-              }`}
+      {(showList || showStatus) && (
+        <div className="absolute z-20 mt-1 w-full overflow-hidden bg-gray-800 border border-gray-700 rounded-lg shadow-xl">
+          {showList && (
+            <ul
+              id={listId}
+              role="listbox"
+              aria-busy={searching}
+              className={`${s.list} overflow-y-auto transition-opacity ${searching ? 'opacity-60' : ''}`}
             >
-              <span className={`text-white font-medium tabular-nums ${s.number} shrink-0`}>
-                {team.team_number}
-              </span>
-              {team.team_name && (
-                <span className="text-gray-400 truncate">{team.team_name}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {showEmpty && (
-        <div className="absolute z-20 mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg shadow-xl px-4 py-2 text-sm text-gray-500">
-          No teams match
+              {suggestions.map((team, i) => (
+                <li
+                  key={team.team_number}
+                  id={`${listId}-${i}`}
+                  role="option"
+                  aria-selected={i === highlighted}
+                  onMouseDown={() => pick(team)}
+                  onMouseMove={() => setActive(i)}
+                  className={`${s.item} text-sm cursor-pointer transition-colors flex items-center gap-2 ${
+                    i === highlighted ? 'bg-gray-700' : ''
+                  }`}
+                >
+                  <span className={`text-white font-medium tabular-nums ${s.number} shrink-0`}>
+                    {team.team_number}
+                  </span>
+                  {team.team_name && (
+                    <span className="text-gray-400 truncate">{team.team_name}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {showStatus && (
+            <div role="status" className={`${s.item} text-sm text-gray-500`}>
+              {statusText}
+            </div>
+          )}
         </div>
       )}
     </div>

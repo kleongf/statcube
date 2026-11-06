@@ -1,9 +1,11 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useTeamRows } from '../lib/useTeamRows'
 import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
 import TeamSearchBox from '../components/TeamSearchBox'
+import LoadError from '../components/LoadError'
+import { ALLIANCE_SIZE, parseAlliances, paramsMatch, withTeamParams } from '../lib/teamParams'
 import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
 
 // ── Math (same as TeamPage) ───────────────────────────────────────────────────
@@ -33,7 +35,7 @@ function calcRedWinProb(r1, r2, b1, b2, params) {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function TeamPicker({ label, accent, teams, onAdd, onRemove, season, disabledNums }) {
-  const full = teams.length >= 2
+  const full = teams.length >= ALLIANCE_SIZE
 
   const colors = {
     red:  { chip: '#f87171', border: 'border-red-800',   bg: 'bg-red-950',  focus: 'focus:border-red-500',  hover: 'hover:bg-red-900/40' },
@@ -150,11 +152,6 @@ function StatRow({ label, redValues, blueValues }) {
 
 const STAT_COLUMNS = 'team_number, team_name, current_epa, current_auto_epa, current_teleop_epa'
 
-function parseTeamNumbers(raw) {
-  const nums = (raw ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0)
-  return [...new Set(nums)].slice(0, 2)
-}
-
 export default function AllianceComparePage() {
   const { season: seasonParam } = useParams()
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
@@ -165,27 +162,28 @@ function AllianceView({ season }) {
   const params = SEASON_PARAMS[season] ?? SEASON_PARAMS[CURRENT_SEASON]
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const redNums = useMemo(() => parseTeamNumbers(searchParams.get('red')), [searchParams])
-  const blueNums = useMemo(() => parseTeamNumbers(searchParams.get('blue')), [searchParams])
-  const { rows: teamRows, seed } = useTeamRows(season, [...redNums, ...blueNums], STAT_COLUMNS)
+  const { red: redNums, blue: blueNums } = useMemo(
+    () => parseAlliances(searchParams.get('red'), searchParams.get('blue')),
+    [searchParams],
+  )
+  const { rows: teamRows, seed, failed, retry } = useTeamRows(season, [...redNums, ...blueNums], STAT_COLUMNS)
   const toTeam = (n) => teamRows[n] ?? { team_number: n }
   const redTeams = redNums.map(toTeam)
   const blueTeams = blueNums.map(toTeam)
 
+  useEffect(() => {
+    const lists = { red: redNums, blue: blueNums }
+    if (!paramsMatch(searchParams, lists)) {
+      setSearchParams((prev) => withTeamParams(prev, lists), { replace: true })
+    }
+  }, [searchParams, setSearchParams, redNums, blueNums])
+
   function setAlliance(key, nums) {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev)
-        if (nums.length) next.set(key, nums.join(','))
-        else next.delete(key)
-        return next
-      },
-      { replace: true },
-    )
+    setSearchParams((prev) => withTeamParams(prev, { [key]: nums }))
   }
 
   function addTo(key, nums, team) {
-    if (nums.length >= 2) return
+    if (nums.length >= ALLIANCE_SIZE || disabledNums.has(team.team_number)) return
     seed(team)
     setAlliance(key, [...nums, team.team_number])
   }
@@ -193,7 +191,7 @@ function AllianceView({ season }) {
   const addRed = (team) => addTo('red', redNums, team)
   const addBlue = (team) => addTo('blue', blueNums, team)
 
-  const disabledNums = useMemo(() => new Set([...redNums, ...blueNums]), [redNums, blueNums])
+  const disabledNums = new Set([...redNums, ...blueNums])
 
   const getStat = (team, key) => teamRows[team?.team_number]?.[key] ?? null
 
@@ -246,6 +244,8 @@ function AllianceView({ season }) {
             disabledNums={disabledNums}
           />
         </div>
+
+        {failed && <LoadError onRetry={retry} />}
 
         {/* Comparison */}
         {!showComparison ? (

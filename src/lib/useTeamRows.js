@@ -3,6 +3,8 @@ import { fetchTeamsByNumber } from './teams'
 
 export function useTeamRows(season, numbers, columns) {
   const [rows, setRows] = useState({})
+  const [failedKey, setFailedKey] = useState(null)
+  const [attempt, setAttempt] = useState(0)
   const missingKey = numbers.filter((n) => !rows[n]?.loaded).join(',')
 
   useEffect(() => {
@@ -19,13 +21,21 @@ export function useTeamRows(season, numbers, columns) {
           return next
         })
       })
-      .catch((err) => console.error('Failed to load teams', err))
+      .catch((err) => {
+        console.error('Failed to load teams', err)
+        if (!stale) setFailedKey(missingKey)
+      })
     return () => { stale = true }
-  }, [season, columns, missingKey])
+  }, [season, columns, missingKey, attempt])
 
   function seed(team) {
     setRows((prev) => ({ ...prev, [team.team_number]: { ...team, ...prev[team.team_number] } }))
   }
 
-  return { rows, seed }
+  function retry() {
+    setFailedKey(null)
+    setAttempt((n) => n + 1)
+  }
+
+  return { rows, seed, failed: Boolean(missingKey) && failedKey === missingKey, retry }
 }

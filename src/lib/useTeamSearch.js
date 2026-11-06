@@ -1,31 +1,55 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { searchTeams } from './teams'
 
-const SEARCH_DEBOUNCE_MS = 250
+const SEARCH_DEBOUNCE_MS = 150
+const NO_RESULTS = { key: '', results: [] }
 
-export function useTeamSearch(season, query) {
+export function useTeamSearch(season, query, excluded) {
   const q = query.trim()
-  const key = `${season}|${q}`
-  const [settled, setSettled] = useState({ key: '', results: [] })
+  const excludedKey = [...excluded].sort((a, b) => a - b).join(',')
+  const key = `${season}|${q}|${excludedKey}`
+  const [settled, setSettled] = useState(NO_RESULTS)
+  const runNow = useRef(null)
+
+  if (!q && settled.key) setSettled(NO_RESULTS)
 
   useEffect(() => {
     if (!q) return
-    let stale = false
-    const timer = setTimeout(async () => {
-      let results = []
-      try {
-        results = await searchTeams(season, q)
-      } catch (err) {
-        console.error('Team search failed', err)
-      }
-      if (!stale) setSettled({ key, results })
-    }, SEARCH_DEBOUNCE_MS)
-    return () => {
-      stale = true
-      clearTimeout(timer)
+    let live = true
+    let request = null
+    const run = () => {
+      request ??= searchTeams(season, q, {
+        exclude: excludedKey ? excludedKey.split(',').map(Number) : [],
+      })
+        .catch((err) => {
+          console.error('Team search failed', err)
+          return []
+        })
+        .then((results) => {
+          if (!live) return null
+          setSettled({ key, results })
+          return results
+        })
+      return request
     }
-  }, [season, q, key])
+    const timer = setTimeout(run, SEARCH_DEBOUNCE_MS)
+    runNow.current = () => {
+      clearTimeout(timer)
+      return run()
+    }
+    return () => {
+      live = false
+      clearTimeout(timer)
+      runNow.current = null
+    }
+  }, [season, q, excludedKey, key])
 
-  const ready = Boolean(q) && settled.key === key
-  return { results: ready ? settled.results : [], searched: ready }
+  const status = !q ? 'idle' : settled.key === key ? 'settled' : 'pending'
+
+  function flush() {
+    if (status === 'settled') return Promise.resolve(settled.results)
+    return runNow.current?.() ?? Promise.resolve(null)
+  }
+
+  return { results: q ? settled.results : [], status, flush }
 }
