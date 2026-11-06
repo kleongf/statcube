@@ -1,5 +1,3 @@
-// Records ftcscout's response to getEventQuery as test fixtures.
-// Usage: node scripts/record-ranking-fixtures.mjs 2025:USMIGRQ 2024:USTXNXM5
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'

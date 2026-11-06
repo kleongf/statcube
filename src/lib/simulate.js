@@ -11,7 +11,6 @@ export function mulberry32(seed) {
   }
 }
 
-// An upcoming match lists each alliance's entries: { teamNumber, onField, surrogate }.
 export function upcomingMatches(matches) {
   const toEntry = ({ teamNumber, onField, surrogate }) => ({ teamNumber, onField, surrogate })
   return matches
@@ -45,18 +44,7 @@ export function topNProbability(team, n, runs) {
   return hits / runs
 }
 
-// Plays the upcoming qualification matches `runs` times from the replayed standings.
-// Each alliance scores Normal(sum of its ratings, a * sum^p) rounded to a whole number,
-// and only win and tie RP are awarded. Tiebreak averages stay at their replayed values.
-//   standings  replayRankings output
-//   upcoming   upcomingMatches output
-//   ratings    Map of teamNumber to rating, params.mean when absent
-//   params     { mean, a, p } for the season
-//   rules      { winRp, tieRp }
-// Returns { runs, teams } with one row per team in standings order:
-//   { teamNumber, startRank, startRp, meanRank, meanRp, p10Rank, medianRank, p90Rank, rankCounts }
-// rankCounts[r - 1] is how many runs ended with the team at rank r.
-export function runSimulations({ standings, upcoming, ratings, params, rules, runs, rng = Math.random }) {
+export function runSimulations({ standings, upcoming, ratings, params, rules: { winRp, tieRp }, runs, rng = Math.random }) {
   const teamCount = standings.length
   const slot = new Map(standings.map((row, i) => [row.teamNumber, i]))
   const baseRp = Float64Array.from(standings, (row) => row.rpTotal)
@@ -104,8 +92,8 @@ export function runSimulations({ standings, upcoming, ratings, params, rules, ru
     for (const m of plan) {
       const red = Math.max(0, Math.round(m.red.mean + m.red.std * normal()))
       const blue = Math.max(0, Math.round(m.blue.mean + m.blue.std * normal()))
-      award(m.redSlots, red > blue ? rules.winRp : red === blue ? rules.tieRp : 0)
-      award(m.blueSlots, blue > red ? rules.winRp : red === blue ? rules.tieRp : 0)
+      award(m.redSlots, red > blue ? winRp : red === blue ? tieRp : 0)
+      award(m.blueSlots, blue > red ? winRp : red === blue ? tieRp : 0)
     }
     for (const f of field) f.rp = played[f.slot] ? rpTotal[f.slot] / played[f.slot] : 0
     field.sort(compareRankings)
