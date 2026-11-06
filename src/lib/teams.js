@@ -3,8 +3,10 @@ import { supabase } from './supabase'
 const PICKER_COLUMNS = 'team_number, team_name'
 const INT4_MAX = 2147483647
 
-function numberPrefixRanges(digits) {
-  if (!/^[1-9]\d*$/.test(digits) || Number(digits) > INT4_MAX) return []
+function numberPrefixRanges(query) {
+  if (!/^\d+$/.test(query)) return []
+  const digits = query.replace(/^0+/, '')
+  if (!digits || Number(digits) > INT4_MAX) return []
   const ranges = []
   for (let span = 1; Number(digits) * span <= INT4_MAX; span *= 10) {
     const lo = Number(digits) * span

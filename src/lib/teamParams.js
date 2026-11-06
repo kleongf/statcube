@@ -38,3 +38,7 @@ export function paramsMatch(searchParams, lists) {
     ([key, numbers]) => (searchParams.get(key) ?? '') === numbers.join(','),
   )
 }
+
+export function dropUnknownTeams(numbers, rows) {
+  return numbers.filter((n) => rows[n]?.exists !== false)
+}

@@ -6,6 +6,8 @@ const SIZES = {
   sm: { input: 'px-3 py-1.5', list: 'max-h-52', item: 'px-3 py-2', number: 'w-14' },
 }
 
+const STATUS_TEXT = { pending: 'Searching…', failed: 'Search failed', settled: 'No teams match' }
+
 export default function TeamSearchBox({
   season,
   excluded,
@@ -17,14 +19,25 @@ export default function TeamSearchBox({
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
+  const [seenResults, setSeenResults] = useState(null)
   const rootRef = useRef(null)
+  const onPickRef = useRef(onPick)
+  const enterQueued = useRef(false)
   const listId = useId()
   const s = SIZES[size]
 
   const { results, status, flush } = useTeamSearch(season, search, excluded)
+  if (seenResults !== results) {
+    setSeenResults(results)
+    setActive(0)
+  }
   const suggestions = results.filter((t) => !excluded.has(t.team_number))
   const searching = status === 'pending'
   const highlighted = Math.min(active, suggestions.length - 1)
+
+  useEffect(() => {
+    onPickRef.current = onPick
+  })
 
   useEffect(() => {
     function handleClick(e) {
@@ -35,7 +48,7 @@ export default function TeamSearchBox({
   }, [])
 
   function pick(team) {
-    onPick(team)
+    onPickRef.current(team)
     setSearch('')
     setOpen(false)
   }
@@ -47,9 +60,16 @@ export default function TeamSearchBox({
     }
     if (e.key === 'Enter' && open && searching) {
       e.preventDefault()
+      if (enterQueued.current) return
+      enterQueued.current = true
       flush().then((found) => {
+        enterQueued.current = false
         if (found?.length) pick(found[0])
       })
+      return
+    }
+    if (searching && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault()
       return
     }
     if (!suggestions.length) return
@@ -68,8 +88,8 @@ export default function TeamSearchBox({
   }
 
   const showList = open && suggestions.length > 0
-  const showStatus = open && (searching || (status === 'settled' && suggestions.length === 0))
-  const statusText = searching ? 'Searching…' : 'No teams match'
+  const showStatus = open && (searching || status === 'failed' || (status === 'settled' && suggestions.length === 0))
+  const statusText = STATUS_TEXT[status]
 
   return (
     <div className="relative" ref={rootRef}>

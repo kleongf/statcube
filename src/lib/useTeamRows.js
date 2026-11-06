@@ -6,6 +6,12 @@ export function useTeamRows(season, numbers, columns) {
   const [failedKey, setFailedKey] = useState(null)
   const [attempt, setAttempt] = useState(0)
   const missingKey = numbers.filter((n) => !rows[n]?.loaded).join(',')
+  const [seenKey, setSeenKey] = useState(missingKey)
+
+  if (seenKey !== missingKey) {
+    setSeenKey(missingKey)
+    setFailedKey(null)
+  }
 
   useEffect(() => {
     if (!missingKey) return
@@ -16,8 +22,8 @@ export function useTeamRows(season, numbers, columns) {
         if (stale) return
         setRows((prev) => {
           const next = { ...prev }
-          for (const n of wanted) next[n] = { team_number: n, ...prev[n], loaded: true }
-          for (const row of fetched) next[row.team_number] = { ...row, loaded: true }
+          for (const n of wanted) next[n] = { team_number: n, exists: false, ...prev[n], loaded: true }
+          for (const row of fetched) next[row.team_number] = { ...row, exists: true, loaded: true }
           return next
         })
       })
@@ -29,7 +35,7 @@ export function useTeamRows(season, numbers, columns) {
   }, [season, columns, missingKey, attempt])
 
   function seed(team) {
-    setRows((prev) => ({ ...prev, [team.team_number]: { ...team, ...prev[team.team_number] } }))
+    setRows((prev) => ({ ...prev, [team.team_number]: { ...team, ...prev[team.team_number], exists: true } }))
   }
 
   function retry() {

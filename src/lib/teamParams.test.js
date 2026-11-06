@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  dropUnknownTeams,
   parseAlliances,
   parseCompareTeams,
   parseTeamList,
@@ -82,5 +83,21 @@ describe('team URL parameters', () => {
     expect(paramsMatch(new URLSearchParams('teams=18,0x12'), { teams: [18] })).toBe(false)
     expect(paramsMatch(new URLSearchParams('teams=abc'), { teams: [] })).toBe(false)
     expect(paramsMatch(new URLSearchParams(''), { teams: [] })).toBe(true)
+  })
+})
+
+describe('dropUnknownTeams', () => {
+  const rows = {
+    16: { team_number: 16, exists: true, loaded: true },
+    123456: { team_number: 123456, exists: false, loaded: true },
+    18: { team_number: 18 },
+  }
+
+  it('drops teams whose lookup found no row, keeping order', () => {
+    expect(dropUnknownTeams([123456, 18, 16], rows)).toEqual([18, 16])
+  })
+
+  it('keeps teams that are still loading or not yet requested', () => {
+    expect(dropUnknownTeams([18, 99], rows)).toEqual([18, 99])
   })
 })

@@ -9,7 +9,7 @@ import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
 import TeamSearchBox from '../components/TeamSearchBox'
 import LoadError from '../components/LoadError'
-import { MAX_COMPARE_TEAMS, parseCompareTeams, paramsMatch, withTeamParams } from '../lib/teamParams'
+import { MAX_COMPARE_TEAMS, dropUnknownTeams, parseCompareTeams, paramsMatch, withTeamParams } from '../lib/teamParams'
 import { CURRENT_SEASON } from '../lib/constants'
 
 const TEAM_COLORS = [
@@ -87,11 +87,12 @@ function CompareView({ season }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const [metric, setMetric] = useState('epa')
 
-  const teamNumbers = useMemo(
+  const requested = useMemo(
     () => parseCompareTeams(searchParams.get('teams')),
     [searchParams],
   )
-  const { rows: teamRows, seed, failed, retry } = useTeamRows(season, teamNumbers, EPA_COLUMNS)
+  const { rows: teamRows, seed, failed, retry } = useTeamRows(season, requested, EPA_COLUMNS)
+  const teamNumbers = useMemo(() => dropUnknownTeams(requested, teamRows), [requested, teamRows])
   const selected = teamNumbers.map((n) => teamRows[n] ?? { team_number: n })
 
   useEffect(() => {

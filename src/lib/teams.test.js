@@ -68,9 +68,25 @@ describe('searchTeams', () => {
     expect(orFilter()).toBe('(team_name.imatch."99999999999999999999")')
   })
 
-  it('searches only names when the digits have a leading zero', async () => {
+  it('ignores leading zeros in the number clause', async () => {
     await searchTeams(2025, '007')
-    expect(orFilter()).toBe('(team_name.imatch."007")')
+    expect(orFilter()).toBe(
+      '(team_number.eq.7,' +
+        'and(team_number.gte.70,team_number.lte.79),' +
+        'and(team_number.gte.700,team_number.lte.799),' +
+        'and(team_number.gte.7000,team_number.lte.7999),' +
+        'and(team_number.gte.70000,team_number.lte.79999),' +
+        'and(team_number.gte.700000,team_number.lte.799999),' +
+        'and(team_number.gte.7000000,team_number.lte.7999999),' +
+        'and(team_number.gte.70000000,team_number.lte.79999999),' +
+        'and(team_number.gte.700000000,team_number.lte.799999999),' +
+        'team_name.imatch."007")',
+    )
+  })
+
+  it('has no number clause for an all-zero query', async () => {
+    await searchTeams(2025, '000')
+    expect(orFilter()).toBe('(team_name.imatch."000")')
   })
 
   it('searches only names for a non-numeric query', async () => {

@@ -5,7 +5,7 @@ import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
 import TeamSearchBox from '../components/TeamSearchBox'
 import LoadError from '../components/LoadError'
-import { ALLIANCE_SIZE, parseAlliances, paramsMatch, withTeamParams } from '../lib/teamParams'
+import { ALLIANCE_SIZE, dropUnknownTeams, parseAlliances, paramsMatch, withTeamParams } from '../lib/teamParams'
 import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
 
 function erf(x) {
@@ -151,11 +151,17 @@ function AllianceView({ season }) {
   const params = SEASON_PARAMS[season] ?? SEASON_PARAMS[CURRENT_SEASON]
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const { red: redNums, blue: blueNums } = useMemo(
+  const requested = useMemo(
     () => parseAlliances(searchParams.get('red'), searchParams.get('blue')),
     [searchParams],
   )
-  const { rows: teamRows, seed, failed, retry } = useTeamRows(season, [...redNums, ...blueNums], STAT_COLUMNS)
+  const { rows: teamRows, seed, failed, retry } = useTeamRows(
+    season,
+    [...requested.red, ...requested.blue],
+    STAT_COLUMNS,
+  )
+  const redNums = useMemo(() => dropUnknownTeams(requested.red, teamRows), [requested, teamRows])
+  const blueNums = useMemo(() => dropUnknownTeams(requested.blue, teamRows), [requested, teamRows])
   const toTeam = (n) => teamRows[n] ?? { team_number: n }
   const redTeams = redNums.map(toTeam)
   const blueTeams = blueNums.map(toTeam)
