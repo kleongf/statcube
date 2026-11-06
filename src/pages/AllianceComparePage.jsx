@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
-import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
+import { CURRENT_SEASON } from '../lib/constants'
+import { useSeason } from '../lib/useSeason'
 
 // ── Math (same as TeamPage) ───────────────────────────────────────────────────
 
@@ -191,7 +192,7 @@ function StatRow({ label, redValues, blueValues }) {
 export default function AllianceComparePage() {
   const { season: seasonParam } = useParams()
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
-  const params = SEASON_PARAMS[season] ?? SEASON_PARAMS[CURRENT_SEASON]
+  const { params, error: seasonError } = useSeason(season)
 
   const [allTeams, setAllTeams] = useState([])
   const [teamsLoading, setTeamsLoading] = useState(true)
@@ -267,7 +268,7 @@ export default function AllianceComparePage() {
   const showComparison = redTeams.length > 0 || blueTeams.length > 0
   const showWinProb = redTeams.length > 0 && blueTeams.length > 0
 
-  const winProb = showWinProb
+  const winProb = showWinProb && params
     ? calcRedWinProb(redEpas[0], redEpas[1] ?? null, blueEpas[0], blueEpas[1] ?? null, params)
     : null
 
@@ -282,6 +283,12 @@ export default function AllianceComparePage() {
         <p className="text-gray-400 mb-6 text-sm">
           {season}/{season + 1} season · Build two alliances and compare their expected performance
         </p>
+
+        {seasonError && (
+          <div className="bg-red-900/40 border border-red-700 rounded-lg p-4 text-red-300 mb-4 text-sm">
+            {seasonError}
+          </div>
+        )}
 
         {/* Alliance pickers */}
         <div className="flex gap-4 mb-6">

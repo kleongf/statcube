@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import SeasonSelect from '../components/SeasonSelect'
-import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
+import { CURRENT_SEASON } from '../lib/constants'
+import { useSeason } from '../lib/useSeason'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -362,6 +363,7 @@ export default function TeamPage() {
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
   const navigate = useNavigate()
   const teamNum = parseInt(teamNumber, 10)
+  const { params, error: seasonError } = useSeason(season)
 
   const [team, setTeam] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -547,7 +549,7 @@ export default function TeamPage() {
                 </span>
               </h2>
 
-              {matchesLoading && (
+              {(matchesLoading || (!params && !seasonError)) && (
                 <div className="text-gray-500 text-sm py-6">Loading matches…</div>
               )}
 
@@ -557,13 +559,19 @@ export default function TeamPage() {
                 </div>
               )}
 
+              {seasonError && (
+                <div className="bg-red-900/40 border border-red-700 rounded-lg p-4 text-red-300 text-sm">
+                  {seasonError}
+                </div>
+              )}
+
               {!matchesLoading && !matchesError && matchEvents.length === 0 && (
                 <div className="bg-gray-900 rounded-xl border border-gray-800 p-10 text-center text-gray-500">
                   No matches found for this season.
                 </div>
               )}
 
-              {!matchesLoading && matchEvents.length > 0 && (
+              {!matchesLoading && params && matchEvents.length > 0 && (
                 <div className="flex flex-col gap-5">
                   {matchEvents.map(([eventCode, matches]) => (
                     <EventMatchTable
@@ -572,7 +580,7 @@ export default function TeamPage() {
                       matches={matches}
                       teamNumber={teamNum}
                       teamEpas={teamEpas}
-                      params={SEASON_PARAMS[season] ?? SEASON_PARAMS[2025]}
+                      params={params}
                     />
                   ))}
                 </div>

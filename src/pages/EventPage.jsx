@@ -3,7 +3,8 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { ftcscoutQuery } from '../lib/ftcscout'
 import { supabase } from '../lib/supabase'
-import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
+import { CURRENT_SEASON } from '../lib/constants'
+import { useSeason } from '../lib/useSeason'
 import SortableTeamsTable from '../components/SortableTeamsTable'
 
 
@@ -423,6 +424,7 @@ export default function EventPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const eventName = location.state?.name
+  const { params, error: seasonError } = useSeason(season)
 
   const [event, setEvent] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -496,6 +498,12 @@ export default function EventPage() {
           </div>
         )}
 
+        {seasonError && (
+          <div className="bg-red-900/40 border border-red-700 rounded-lg p-4 text-red-300 mb-4 text-sm">
+            {seasonError}
+          </div>
+        )}
+
         {loading && (
           <div className="flex items-center justify-center py-20 text-gray-500">
             Loading event…
@@ -549,8 +557,12 @@ export default function EventPage() {
               />
             )}
 
-            {activeTab === 'matches' && (
-              <MatchesTab matches={event.matches} epaLookups={epaLookups} params={SEASON_PARAMS[season] ?? SEASON_PARAMS[2025]} />
+            {activeTab === 'matches' && !params && !seasonError && (
+              <div className="text-gray-500 text-sm py-6">Loading matches…</div>
+            )}
+
+            {activeTab === 'matches' && params && (
+              <MatchesTab matches={event.matches} epaLookups={epaLookups} params={params} />
             )}
 
             {activeTab === 'rankings' && (
