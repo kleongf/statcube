@@ -130,6 +130,18 @@ def test_from_env_names_every_missing_variable():
     assert "SUPABASE_URL, SUPABASE_SECRET_KEY" in str(caught.value)
 
 
+def test_from_env_rejects_a_masked_key_without_echoing_it(no_network):
+    masked = "sb_secret_\u2022\u2022\u2022\u2022\u2022\u2022"
+    env = {"SUPABASE_URL": "https://example.supabase.co", "SUPABASE_SECRET_KEY": masked}
+
+    with pytest.raises(store.MaskedKey) as caught:
+        store.SupabaseStore.from_env(env)
+
+    assert "SUPABASE_SECRET_KEY" in str(caught.value)
+    assert masked not in str(caught.value)
+    assert no_network == []
+
+
 def test_from_env_builds_a_store_without_touching_the_network(no_network):
     env = {"SUPABASE_URL": "https://example.supabase.co", "SUPABASE_SECRET_KEY": "placeholder-key"}
 

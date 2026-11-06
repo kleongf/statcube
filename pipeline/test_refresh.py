@@ -67,6 +67,16 @@ def test_missing_credentials_exit_2_naming_them_before_any_network_call(capsys, 
     assert no_network == []
 
 
+def test_a_masked_key_exits_2_before_any_network_call(capsys, no_network):
+    env = {"SUPABASE_URL": "https://example.supabase.co", "SUPABASE_SECRET_KEY": "sb_secret_\u2022\u2022\u2022"}
+
+    code = refresh.main(["run", "--season", "2025"], env=env)
+
+    assert code == 2
+    assert "--reveal" in capsys.readouterr().err
+    assert no_network == []
+
+
 def test_a_season_without_parameters_exits_2_naming_it_and_fetches_nothing(capsys):
     def fetch_must_not_run(season: epa.Season) -> epa.SeasonMatches:
         raise AssertionError("fetched")

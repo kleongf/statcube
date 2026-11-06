@@ -16,7 +16,7 @@ from typing import Callable, Mapping, Sequence
 
 import epa
 import ftcscout
-from store import DryRunStore, MissingEnv, Store, SupabaseStore, UnknownSeason, WriteFailed
+from store import DryRunStore, MaskedKey, MissingEnv, Store, SupabaseStore, UnknownSeason, WriteFailed
 
 Fetch = Callable[[epa.Season], epa.SeasonMatches]
 
@@ -72,7 +72,7 @@ def main(
     fetch: Fetch | None = None,
     store: Store | None = None,
 ) -> int:
-    """0 on success. 1 on FetchFailed or a failed write. 2 on usage, MissingEnv, or UnknownSeason.
+    """0 on success. 1 on FetchFailed or a failed write. 2 on usage, MissingEnv, MaskedKey, or UnknownSeason.
 
     Builds the store first, so a missing variable exits before any network call.
     `fetch` and `store` are test seams. Production builds them from argv and env:
@@ -92,7 +92,7 @@ def main(
         if fetch is None:
             fetch = partial(ftcscout.fetch_season, post=ftcscout.http_post(env.get("FTCSCOUT_GRAPHQL_URL", ftcscout.DEFAULT_URL)))
         summary = refresh_season(args.season, store, fetch=fetch)
-    except (MissingEnv, UnknownSeason) as exc:
+    except (MissingEnv, MaskedKey, UnknownSeason) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except ftcscout.FetchFailed as exc:

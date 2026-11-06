@@ -34,6 +34,14 @@ class MissingEnv(Exception):
         super().__init__(f"missing environment variable(s): {', '.join(self.names)}")
 
 
+class MaskedKey(Exception):
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            f"{name} has non-ASCII characters, so it is probably a masked copy. "
+            "Copy it again with `supabase projects api-keys --reveal`."
+        )
+
+
 class UnknownSeason(Exception):
     def __init__(self, season: int) -> None:
         super().__init__(f"season {season} has no parameters")
@@ -89,10 +97,12 @@ class SupabaseStore:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> SupabaseStore:
-        """Raises MissingEnv naming every absent variable, before any network call."""
+        """Raises MissingEnv naming every absent variable, or MaskedKey, before any network call."""
         missing = [name for name in REQUIRED_ENV if not env.get(name)]
         if missing:
             raise MissingEnv(missing)
+        if not env["SUPABASE_SECRET_KEY"].isascii():
+            raise MaskedKey("SUPABASE_SECRET_KEY")
         http_client = httpx.Client(http2=False, timeout=REQUEST_TIMEOUT_S)
         client = create_client(
             env["SUPABASE_URL"], env["SUPABASE_SECRET_KEY"], options=ClientOptions(httpx_client=http_client),
