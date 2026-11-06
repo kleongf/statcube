@@ -1,0 +1,1066 @@
+{
+ "season": 2025,
+ "provenance": "KZKAQ: the 20 played matches, fetched from api.ftcscout.org on 2026-11-06, unmodified. KZASSQ holds two entries. The first is a verbatim copy of the 3rd KZKAQ match, the duplicate that order_matches must drop. The second is a real KZASSQ match that shares a team with the KZKAQ match at index 5, with its postResultTime edited to equal that match's, the same-second tie that order_matches must break by event code.",
+ "events": {
+  "KZKAQ": [
+   {
+    "postResultTime": "2025-12-21T09:38:53.226Z",
+    "scores": {
+     "red": {
+      "totalPoints": 63,
+      "autoPoints": 6
+     },
+     "blue": {
+      "totalPoints": 90,
+      "autoPoints": 13
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 33633,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "02\u0f3c \u3064 \u25d5_\u25d5 \u0f3d\u3064"
+      }
+     },
+     {
+      "teamNumber": 33951,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Speed Setters"
+      }
+     },
+     {
+      "teamNumber": 27500,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Tech_B12"
+      }
+     },
+     {
+      "teamNumber": 24783,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Venom"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T09:48:08.472Z",
+    "scores": {
+     "red": {
+      "totalPoints": 29,
+      "autoPoints": 3
+     },
+     "blue": {
+      "totalPoints": 102,
+      "autoPoints": 5
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 34091,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "J-Tech"
+      }
+     },
+     {
+      "teamNumber": 28659,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Hotwheels"
+      }
+     },
+     {
+      "teamNumber": 33425,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "shyraq"
+      }
+     },
+     {
+      "teamNumber": 29393,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "JuzzTogyz"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T09:59:42.621Z",
+    "scores": {
+     "red": {
+      "totalPoints": 125,
+      "autoPoints": 28
+     },
+     "blue": {
+      "totalPoints": 154,
+      "autoPoints": 49
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 24443,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "queue team"
+      }
+     },
+     {
+      "teamNumber": 21062,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "QUANT"
+      }
+     },
+     {
+      "teamNumber": 25528,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Nomadic Dragons"
+      }
+     },
+     {
+      "teamNumber": 33633,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "02\u0f3c \u3064 \u25d5_\u25d5 \u0f3d\u3064"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T10:10:20.720Z",
+    "scores": {
+     "red": {
+      "totalPoints": 189,
+      "autoPoints": 45
+     },
+     "blue": {
+      "totalPoints": 89,
+      "autoPoints": 11
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 33951,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Speed Setters"
+      }
+     },
+     {
+      "teamNumber": 25528,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Nomadic Dragons"
+      }
+     },
+     {
+      "teamNumber": 33425,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "shyraq"
+      }
+     },
+     {
+      "teamNumber": 24443,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "queue team"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T10:23:11.116Z",
+    "scores": {
+     "red": {
+      "totalPoints": 93,
+      "autoPoints": 5
+     },
+     "blue": {
+      "totalPoints": 154,
+      "autoPoints": 40
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 29393,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "JuzzTogyz"
+      }
+     },
+     {
+      "teamNumber": 24783,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Venom"
+      }
+     },
+     {
+      "teamNumber": 21062,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "QUANT"
+      }
+     },
+     {
+      "teamNumber": 27500,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Tech_B12"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T10:34:15.105Z",
+    "scores": {
+     "red": {
+      "totalPoints": 66,
+      "autoPoints": 0
+     },
+     "blue": {
+      "totalPoints": 209,
+      "autoPoints": 26
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 34091,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "J-Tech"
+      }
+     },
+     {
+      "teamNumber": 27500,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Tech_B12"
+      }
+     },
+     {
+      "teamNumber": 21062,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "QUANT"
+      }
+     },
+     {
+      "teamNumber": 28659,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Hotwheels"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T10:43:25.252Z",
+    "scores": {
+     "red": {
+      "totalPoints": 95,
+      "autoPoints": 13
+     },
+     "blue": {
+      "totalPoints": 90,
+      "autoPoints": 26
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 29393,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "JuzzTogyz"
+      }
+     },
+     {
+      "teamNumber": 33633,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "02\u0f3c \u3064 \u25d5_\u25d5 \u0f3d\u3064"
+      }
+     },
+     {
+      "teamNumber": 33951,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Speed Setters"
+      }
+     },
+     {
+      "teamNumber": 33425,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "shyraq"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T10:52:47.655Z",
+    "scores": {
+     "red": {
+      "totalPoints": 182,
+      "autoPoints": 40
+     },
+     "blue": {
+      "totalPoints": 75,
+      "autoPoints": 11
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 24443,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "queue team"
+      }
+     },
+     {
+      "teamNumber": 25528,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Nomadic Dragons"
+      }
+     },
+     {
+      "teamNumber": 24783,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Venom"
+      }
+     },
+     {
+      "teamNumber": 34091,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "J-Tech"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T11:00:08.965Z",
+    "scores": {
+     "red": {
+      "totalPoints": 74,
+      "autoPoints": 14
+     },
+     "blue": {
+      "totalPoints": 201,
+      "autoPoints": 30
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 28659,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Hotwheels"
+      }
+     },
+     {
+      "teamNumber": 33425,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "shyraq"
+      }
+     },
+     {
+      "teamNumber": 24783,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Venom"
+      }
+     },
+     {
+      "teamNumber": 21062,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "QUANT"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T11:08:55.292Z",
+    "scores": {
+     "red": {
+      "totalPoints": 163,
+      "autoPoints": 37
+     },
+     "blue": {
+      "totalPoints": 44,
+      "autoPoints": 3
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 29393,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "JuzzTogyz"
+      }
+     },
+     {
+      "teamNumber": 25528,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Nomadic Dragons"
+      }
+     },
+     {
+      "teamNumber": 28659,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Hotwheels"
+      }
+     },
+     {
+      "teamNumber": 33951,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Speed Setters"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T11:19:03.317Z",
+    "scores": {
+     "red": {
+      "totalPoints": 23,
+      "autoPoints": 13
+     },
+     "blue": {
+      "totalPoints": 44,
+      "autoPoints": 0
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 27500,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Tech_B12"
+      }
+     },
+     {
+      "teamNumber": 33633,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "02\u0f3c \u3064 \u25d5_\u25d5 \u0f3d\u3064"
+      }
+     },
+     {
+      "teamNumber": 34091,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "J-Tech"
+      }
+     },
+     {
+      "teamNumber": 24443,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "queue team"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T11:26:17.292Z",
+    "scores": {
+     "red": {
+      "totalPoints": 129,
+      "autoPoints": 34
+     },
+     "blue": {
+      "totalPoints": 100,
+      "autoPoints": 14
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 21062,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "QUANT"
+      }
+     },
+     {
+      "teamNumber": 34091,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "J-Tech"
+      }
+     },
+     {
+      "teamNumber": 24783,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Venom"
+      }
+     },
+     {
+      "teamNumber": 33951,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Speed Setters"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T11:34:13.475Z",
+    "scores": {
+     "red": {
+      "totalPoints": 51,
+      "autoPoints": 3
+     },
+     "blue": {
+      "totalPoints": 58,
+      "autoPoints": 24
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 28659,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Hotwheels"
+      }
+     },
+     {
+      "teamNumber": 29393,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "JuzzTogyz"
+      }
+     },
+     {
+      "teamNumber": 33633,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "02\u0f3c \u3064 \u25d5_\u25d5 \u0f3d\u3064"
+      }
+     },
+     {
+      "teamNumber": 24443,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "queue team"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T11:48:01.601Z",
+    "scores": {
+     "red": {
+      "totalPoints": 147,
+      "autoPoints": 43
+     },
+     "blue": {
+      "totalPoints": 82,
+      "autoPoints": 0
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 25528,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Nomadic Dragons"
+      }
+     },
+     {
+      "teamNumber": 33425,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "shyraq"
+      }
+     },
+     {
+      "teamNumber": 27500,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Tech_B12"
+      }
+     },
+     {
+      "teamNumber": 29393,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "JuzzTogyz"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T12:18:45.757Z",
+    "scores": {
+     "red": {
+      "totalPoints": 256,
+      "autoPoints": 45
+     },
+     "blue": {
+      "totalPoints": 90,
+      "autoPoints": 18
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 25528,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Nomadic Dragons"
+      }
+     },
+     {
+      "teamNumber": 21062,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "QUANT"
+      }
+     },
+     {
+      "teamNumber": 33425,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "shyraq"
+      }
+     },
+     {
+      "teamNumber": 28659,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Hotwheels"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T12:29:27.777Z",
+    "scores": {
+     "red": {
+      "totalPoints": 128,
+      "autoPoints": 6
+     },
+     "blue": {
+      "totalPoints": 106,
+      "autoPoints": 9
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 24443,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "queue team"
+      }
+     },
+     {
+      "teamNumber": 24783,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Venom"
+      }
+     },
+     {
+      "teamNumber": 33633,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "02\u0f3c \u3064 \u25d5_\u25d5 \u0f3d\u3064"
+      }
+     },
+     {
+      "teamNumber": 29393,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "JuzzTogyz"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T12:39:26.080Z",
+    "scores": {
+     "red": {
+      "totalPoints": 79,
+      "autoPoints": 11
+     },
+     "blue": {
+      "totalPoints": 122,
+      "autoPoints": 24
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 33425,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "shyraq"
+      }
+     },
+     {
+      "teamNumber": 28659,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Hotwheels"
+      }
+     },
+     {
+      "teamNumber": 33633,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "02\u0f3c \u3064 \u25d5_\u25d5 \u0f3d\u3064"
+      }
+     },
+     {
+      "teamNumber": 29393,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "JuzzTogyz"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T12:48:38.342Z",
+    "scores": {
+     "red": {
+      "totalPoints": 236,
+      "autoPoints": 32
+     },
+     "blue": {
+      "totalPoints": 74,
+      "autoPoints": 6
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 25528,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Nomadic Dragons"
+      }
+     },
+     {
+      "teamNumber": 21062,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "QUANT"
+      }
+     },
+     {
+      "teamNumber": 24443,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "queue team"
+      }
+     },
+     {
+      "teamNumber": 24783,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Venom"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T13:05:39.378Z",
+    "scores": {
+     "red": {
+      "totalPoints": 126,
+      "autoPoints": 8
+     },
+     "blue": {
+      "totalPoints": 101,
+      "autoPoints": 23
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 24443,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "queue team"
+      }
+     },
+     {
+      "teamNumber": 24783,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Venom"
+      }
+     },
+     {
+      "teamNumber": 33633,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "02\u0f3c \u3064 \u25d5_\u25d5 \u0f3d\u3064"
+      }
+     },
+     {
+      "teamNumber": 29393,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "JuzzTogyz"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T13:21:17.311Z",
+    "scores": {
+     "red": {
+      "totalPoints": 214,
+      "autoPoints": 39
+     },
+     "blue": {
+      "totalPoints": 140,
+      "autoPoints": 8
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 25528,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Nomadic Dragons"
+      }
+     },
+     {
+      "teamNumber": 21062,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "QUANT"
+      }
+     },
+     {
+      "teamNumber": 24443,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "queue team"
+      }
+     },
+     {
+      "teamNumber": 24783,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Venom"
+      }
+     }
+    ]
+   }
+  ],
+  "KZASSQ": [
+   {
+    "postResultTime": "2025-12-21T09:59:42.621Z",
+    "scores": {
+     "red": {
+      "totalPoints": 125,
+      "autoPoints": 28
+     },
+     "blue": {
+      "totalPoints": 154,
+      "autoPoints": 49
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 24443,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "queue team"
+      }
+     },
+     {
+      "teamNumber": 21062,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "QUANT"
+      }
+     },
+     {
+      "teamNumber": 25528,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "Nomadic Dragons"
+      }
+     },
+     {
+      "teamNumber": 33633,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "02\u0f3c \u3064 \u25d5_\u25d5 \u0f3d\u3064"
+      }
+     }
+    ]
+   },
+   {
+    "postResultTime": "2025-12-21T10:34:15.105Z",
+    "scores": {
+     "red": {
+      "totalPoints": 34,
+      "autoPoints": 0
+     },
+     "blue": {
+      "totalPoints": 25,
+      "autoPoints": 15
+     }
+    },
+    "hasBeenPlayed": true,
+    "teams": [
+     {
+      "teamNumber": 33420,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "EQUINITY"
+      }
+     },
+     {
+      "teamNumber": 33680,
+      "onField": true,
+      "alliance": "Red",
+      "team": {
+       "name": "Atomic Heart"
+      }
+     },
+     {
+      "teamNumber": 34091,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "J-Tech"
+      }
+     },
+     {
+      "teamNumber": 34226,
+      "onField": true,
+      "alliance": "Blue",
+      "team": {
+       "name": "NaYza"
+      }
+     }
+    ]
+   }
+  ]
+ }
+}
