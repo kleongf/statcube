@@ -6,64 +6,10 @@ import { supabase } from '../lib/supabase'
 import { CURRENT_SEASON } from '../lib/constants'
 import { useSeason } from '../lib/useSeason'
 import SortableTeamsTable from '../components/SortableTeamsTable'
+import SimulationTab from '../components/SimulationTab'
+import { getEventQuery } from '../lib/eventQuery'
+import { calcRedWinProb } from '../lib/winProbability'
 
-
-function getEventQuery(season) {
-  return `
-    query EventByCode($season: Int!, $code: String!) {
-      eventByCode(season: $season, code: $code) {
-        location { city country state }
-        start
-        end
-        code
-        matches {
-          matchNum
-          scheduledStartTime
-          postResultTime
-          teams {
-            teamNumber
-            onField
-            alliance
-          }
-          scores {
-            ... on MatchScores${season} {
-              red { totalPoints }
-              blue { totalPoints }
-            }
-          }
-        }
-        teams {
-          teamNumber
-          team { name number }
-          stats {
-            ... on TeamEventStats${season} {
-              qualMatchesPlayed
-              rank
-              rp
-              tb1
-              tb2
-              wins
-              losses
-              ties
-            }
-          }
-        }
-      }
-    }
-  `
-}
-
-// ── Math ─────────────────────────────────────────────────────────────────────
-
-function erf(x) {
-  const sign = x < 0 ? -1 : 1
-  const ax = Math.abs(x)
-  const t = 1 / (1 + 0.3275911 * ax)
-  const poly =
-    t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))))
-  return sign * (1 - poly * Math.exp(-ax * ax))
-}
-function normalCDF(x) { return 0.5 * (1 + erf(x / Math.SQRT2)) }
 
 // ── EPA helpers ───────────────────────────────────────────────────────────────
 
@@ -82,15 +28,6 @@ function getEpaBeforeTime(entries, matchMs) {
     else break
   }
   return result
-}
-
-function calcRedWinProb(r1, r2, b1, b2, params) {
-  const red = (r1 ?? 0) + (r2 ?? 0)
-  const blue = (b1 ?? 0) + (b2 ?? 0)
-  const redStd = params.a * Math.pow(Math.max(1, red), params.p)
-  const blueStd = params.a * Math.pow(Math.max(1, blue), params.p)
-  const z = (0 - (red - blue)) / Math.sqrt(redStd ** 2 + blueStd ** 2)
-  return 1 - normalCDF(z)
 }
 
 function getMatchPredictions(matchTeams, postResultTime, epaLookups, params) {
@@ -422,6 +359,8 @@ function RankingsTab({ teams }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+const NO_TEAM_DATA = {}
+
 export default function EventPage() {
   const { eventCode, season: seasonParam } = useParams()
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
@@ -434,12 +373,22 @@ export default function EventPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  // team_number -> { current_epa, current_auto_epa, current_teleop_epa }
-  const [supabaseData, setSupabaseData] = useState({})
-  // team_number -> sorted [{ms, value}] for win probability
-  const [epaLookups, setEpaLookups] = useState({})
+  const [teamData, setTeamData] = useState(null)
+  const ratingsLoaded = teamData?.forEvent === event
+  const supabaseData = ratingsLoaded ? teamData.supabaseData : NO_TEAM_DATA
+  const epaLookups = ratingsLoaded ? teamData.epaLookups : NO_TEAM_DATA
 
   const [activeTab, setActiveTab] = useState('teams')
+  const [simSettings, setSimSettings] = useState({ runs: 1000, topN: 4, seed: 1 })
+
+  const ratings = useMemo(() => {
+    if (!ratingsLoaded) return null
+    const latest = new Map()
+    for (const [team, entries] of Object.entries(epaLookups)) {
+      if (entries.length > 0) latest.set(Number(team), entries[entries.length - 1].value)
+    }
+    return latest
+  }, [ratingsLoaded, epaLookups])
 
   useEffect(() => {
     async function fetchEvent() {
@@ -456,6 +405,7 @@ export default function EventPage() {
 
   useEffect(() => {
     if (!event) return
+    let current = true
 
     async function fetchTeamData() {
       const numbers = new Set()
@@ -467,7 +417,11 @@ export default function EventPage() {
         .select('team_number, current_epa, current_auto_epa, current_teleop_epa, epa')
         .in('team_number', [...numbers])
 
-      if (error) return
+      if (!current) return
+      if (error) {
+        setTeamData({ forEvent: event, supabaseData: {}, epaLookups: {} })
+        return
+      }
 
       const sb = {}, lookups = {}
       for (const row of data) {
@@ -478,12 +432,12 @@ export default function EventPage() {
         }
         lookups[row.team_number] = buildEpaLookup(row.epa)
       }
-      setSupabaseData(sb)
-      setEpaLookups(lookups)
+      setTeamData({ forEvent: event, supabaseData: sb, epaLookups: lookups })
     }
 
     fetchTeamData()
-  }, [event])
+    return () => { current = false }
+  }, [event, season])
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
@@ -545,6 +499,11 @@ export default function EventPage() {
                 active={activeTab === 'rankings'}
                 onClick={() => setActiveTab('rankings')}
               />
+              <TabButton
+                label="Simulation"
+                active={activeTab === 'simulation'}
+                onClick={() => setActiveTab('simulation')}
+              />
             </div>
 
             {activeTab === 'teams' && (
@@ -568,6 +527,17 @@ export default function EventPage() {
 
             {activeTab === 'rankings' && (
               <RankingsTab teams={event.teams} />
+            )}
+
+            {activeTab === 'simulation' && (
+              <SimulationTab
+                event={event}
+                season={season}
+                ratings={ratings}
+                seasonState={seasonState}
+                settings={simSettings}
+                onSettingsChange={setSimSettings}
+              />
             )}
           </>
         )}

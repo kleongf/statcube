@@ -11,7 +11,7 @@ from typing import Callable, Mapping, Sequence
 
 import epa
 import ftcscout
-from store import DryRunStore, MaskedKey, MissingEnv, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed
+from store import DryRunStore, InvalidEnv, MissingEnv, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed, redact
 
 Fetch = Callable[[epa.Season], epa.SeasonMatches]
 
@@ -60,9 +60,15 @@ def main(
     fetch: Fetch | None = None,
     store: Store | None = None,
 ) -> int:
+    """0 on success. 1 on FetchFailed, a failed season read, or a failed write. 2 on usage, MissingEnv, InvalidEnv, or UnknownSeason."""
     args = _parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    secret = env.get("SUPABASE_SECRET_KEY", "")
+
+    def fail(text: str) -> None:
+        print(redact(text, secret), file=sys.stderr)
+
     try:
         if store is None:
             if args.dry_run is None:
@@ -72,16 +78,16 @@ def main(
         if fetch is None:
             fetch = partial(ftcscout.fetch_season, post=ftcscout.http_post(env.get("FTCSCOUT_GRAPHQL_URL", ftcscout.DEFAULT_URL)))
         summary = refresh_season(args.season, store, fetch=fetch)
-    except (MissingEnv, MaskedKey, UnknownSeason) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    except (MissingEnv, InvalidEnv, UnknownSeason) as exc:
+        fail(f"error: {exc}")
         return 2
     except ftcscout.FetchFailed as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        fail(f"error: {exc}")
         for code, message in sorted(exc.failures.items()):
-            print(f"  {code}: {message}", file=sys.stderr)
+            fail(f"  {code}: {message}")
         return 1
     except (SeasonReadFailed, WriteFailed) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        fail(f"error: {exc}")
         return 1
     print(summary)
     return 0

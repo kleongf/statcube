@@ -1,12 +1,13 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
-import { useParams } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { useEffect, useMemo } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
+import { useTeamRows } from '../lib/useTeamRows'
 import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
+import TeamSearchBox from '../components/TeamSearchBox'
+import LoadError from '../components/LoadError'
+import { ALLIANCE_SIZE, dropUnknownTeams, parseAlliances, paramsMatch, withTeamParams } from '../lib/teamParams'
 import { CURRENT_SEASON } from '../lib/constants'
 import { useSeason } from '../lib/useSeason'
-
-// ── Math (same as TeamPage) ───────────────────────────────────────────────────
 
 function erf(x) {
   const sign = x < 0 ? -1 : 1
@@ -30,34 +31,8 @@ function calcRedWinProb(r1, r2, b1, b2, params) {
   return 1 - normalCDF(z)
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function TeamPicker({ label, accent, teams, onAdd, onRemove, allTeams, teamsLoading, disabledNums }) {
-  const [search, setSearch] = useState('')
-  const [open, setOpen] = useState(false)
-  const dropdownRef = useRef(null)
-  const full = teams.length >= 2
-
-  useEffect(() => {
-    function handleClick(e) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const pool = allTeams.filter((t) => !disabledNums.has(t.team_number))
-    if (!q) return pool.slice(0, 50)
-    return pool
-      .filter(
-        (t) =>
-          String(t.team_number).includes(q) ||
-          (t.team_name ?? '').toLowerCase().includes(q),
-      )
-      .slice(0, 50)
-  }, [allTeams, search, disabledNums])
+function TeamPicker({ label, accent, teams, onAdd, onRemove, season, disabledNums }) {
+  const full = teams.length >= ALLIANCE_SIZE
 
   const colors = {
     red:  { chip: '#f87171', border: 'border-red-800',   bg: 'bg-red-950',  focus: 'focus:border-red-500',  hover: 'hover:bg-red-900/40' },
@@ -71,7 +46,6 @@ function TeamPicker({ label, accent, teams, onAdd, onRemove, allTeams, teamsLoad
         {label}
       </h2>
 
-      {/* Selected chips */}
       <div className="flex flex-col gap-2 mb-3 min-h-[4rem]">
         {teams.map((team) => (
           <span
@@ -101,33 +75,15 @@ function TeamPicker({ label, accent, teams, onAdd, onRemove, allTeams, teamsLoad
         )}
       </div>
 
-      {/* Search */}
       {!full && (
-        <div className="relative" ref={dropdownRef}>
-          <input
-            type="text"
-            placeholder={teamsLoading ? 'Loading teams…' : 'Search team…'}
-            value={search}
-            disabled={teamsLoading}
-            onChange={(e) => { setSearch(e.target.value); setOpen(true) }}
-            onFocus={() => setOpen(true)}
-            className={`w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none ${c.focus} transition-colors`}
-          />
-          {open && filtered.length > 0 && (
-            <ul className="absolute z-20 mt-1 w-full max-h-52 overflow-y-auto bg-gray-800 border border-gray-700 rounded-lg shadow-xl">
-              {filtered.map((team) => (
-                <li
-                  key={team.team_number}
-                  onMouseDown={() => { onAdd(team); setSearch(''); setOpen(false) }}
-                  className="px-3 py-2 text-sm cursor-pointer hover:bg-gray-700 transition-colors flex items-center gap-2"
-                >
-                  <span className="text-white font-medium tabular-nums w-14 shrink-0">{team.team_number}</span>
-                  {team.team_name && <span className="text-gray-400 truncate">{team.team_name}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <TeamSearchBox
+          season={season}
+          excluded={disabledNums}
+          onPick={onAdd}
+          placeholder="Search team…"
+          focusClass={c.focus}
+          size="sm"
+        />
       )}
     </div>
   )
@@ -147,7 +103,6 @@ function StatRow({ label, redValues, blueValues }) {
         <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">{label}</span>
       </div>
       <div className="flex items-center gap-3 mb-1.5">
-        {/* Red side */}
         <div className="flex-1 text-right">
           <span className="text-red-400 font-semibold tabular-nums text-sm">
             {redSum.toFixed(2)}
@@ -160,7 +115,6 @@ function StatRow({ label, redValues, blueValues }) {
             </div>
           )}
         </div>
-        {/* Bar */}
         {hasData && (
           <div className="flex-[2] h-2 rounded-full bg-blue-500 overflow-hidden">
             <div
@@ -169,7 +123,6 @@ function StatRow({ label, redValues, blueValues }) {
             />
           </div>
         )}
-        {/* Blue side */}
         <div className="flex-1">
           <span className="text-blue-400 font-semibold tabular-nums text-sm">
             {blueSum.toFixed(2)}
@@ -187,76 +140,56 @@ function StatRow({ label, redValues, blueValues }) {
   )
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+const STAT_COLUMNS = 'team_number, team_name, current_epa, current_auto_epa, current_teleop_epa'
 
 export default function AllianceComparePage() {
   const { season: seasonParam } = useParams()
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
+  return <AllianceView key={season} season={season} />
+}
+
+function AllianceView({ season }) {
   const { params, error: seasonError } = useSeason(season)
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const [allTeams, setAllTeams] = useState([])
-  const [teamsLoading, setTeamsLoading] = useState(true)
-  const [redTeams, setRedTeams] = useState([])
-  const [blueTeams, setBlueTeams] = useState([])
-  const [teamStats, setTeamStats] = useState({})
-
-  useEffect(() => {
-    setRedTeams([])
-    setBlueTeams([])
-    setTeamStats({})
-  }, [season])
-
-  useEffect(() => {
-    setAllTeams([])
-    setTeamsLoading(true)
-    async function fetchTeams() {
-      const BATCH = 1000
-      let from = 0
-      const rows = []
-      while (true) {
-        const { data, error } = await supabase
-          .from(`epa_${season}`)
-          .select('team_number, team_name')
-          .range(from, from + BATCH - 1)
-        if (error) break
-        rows.push(...data)
-        if (data.length < BATCH) break
-        from += BATCH
-      }
-      setAllTeams(rows.sort((a, b) => a.team_number - b.team_number))
-      setTeamsLoading(false)
-    }
-    fetchTeams()
-  }, [season])
-
-  async function fetchStats(team) {
-    if (teamStats[team.team_number]) return
-    const { data } = await supabase
-      .from(`epa_${season}`)
-      .select('team_number, current_epa, current_auto_epa, current_teleop_epa')
-      .eq('team_number', team.team_number)
-      .single()
-    if (data) setTeamStats((prev) => ({ ...prev, [data.team_number]: data }))
-  }
-
-  function addRed(team) {
-    if (redTeams.length >= 2) return
-    setRedTeams((prev) => [...prev, team])
-    fetchStats(team)
-  }
-
-  function addBlue(team) {
-    if (blueTeams.length >= 2) return
-    setBlueTeams((prev) => [...prev, team])
-    fetchStats(team)
-  }
-
-  const disabledNums = useMemo(
-    () => new Set([...redTeams, ...blueTeams].map((t) => t.team_number)),
-    [redTeams, blueTeams],
+  const requested = useMemo(
+    () => parseAlliances(searchParams.get('red'), searchParams.get('blue')),
+    [searchParams],
   )
+  const { rows: teamRows, seed, failed, retry } = useTeamRows(
+    season,
+    [...requested.red, ...requested.blue],
+    STAT_COLUMNS,
+  )
+  const redNums = useMemo(() => dropUnknownTeams(requested.red, teamRows), [requested, teamRows])
+  const blueNums = useMemo(() => dropUnknownTeams(requested.blue, teamRows), [requested, teamRows])
+  const toTeam = (n) => teamRows[n] ?? { team_number: n }
+  const redTeams = redNums.map(toTeam)
+  const blueTeams = blueNums.map(toTeam)
 
-  const getStat = (team, key) => teamStats[team?.team_number]?.[key] ?? null
+  useEffect(() => {
+    const lists = { red: redNums, blue: blueNums }
+    if (!paramsMatch(searchParams, lists)) {
+      setSearchParams((prev) => withTeamParams(prev, lists), { replace: true })
+    }
+  }, [searchParams, setSearchParams, redNums, blueNums])
+
+  const disabledNums = new Set([...redNums, ...blueNums])
+
+  function setAlliance(key, nums) {
+    setSearchParams((prev) => withTeamParams(prev, { [key]: nums }))
+  }
+
+  function addTo(key, nums, team) {
+    if (nums.length >= ALLIANCE_SIZE || disabledNums.has(team.team_number)) return
+    seed(team)
+    setAlliance(key, [...nums, team.team_number])
+  }
+
+  const addRed = (team) => addTo('red', redNums, team)
+  const addBlue = (team) => addTo('blue', blueNums, team)
+
+  const getStat = (team, key) => teamRows[team?.team_number]?.[key] ?? null
 
   const redEpas  = redTeams.map((t) => getStat(t, 'current_epa'))
   const blueEpas = blueTeams.map((t) => getStat(t, 'current_epa'))
@@ -266,7 +199,9 @@ export default function AllianceComparePage() {
   const blueTeleopEpas = blueTeams.map((t) => getStat(t, 'current_teleop_epa'))
 
   const showComparison = redTeams.length > 0 || blueTeams.length > 0
-  const showWinProb = redTeams.length > 0 && blueTeams.length > 0
+  const showWinProb =
+    redTeams.length > 0 && blueTeams.length > 0 &&
+    [...redTeams, ...blueTeams].every((t) => t.loaded)
 
   const winProb = showWinProb && params
     ? calcRedWinProb(redEpas[0], redEpas[1] ?? null, blueEpas[0], blueEpas[1] ?? null, params)
@@ -290,16 +225,14 @@ export default function AllianceComparePage() {
           </div>
         )}
 
-        {/* Alliance pickers */}
         <div className="flex gap-4 mb-6">
           <TeamPicker
             label="Red Alliance"
             accent="red"
             teams={redTeams}
             onAdd={addRed}
-            onRemove={(num) => setRedTeams((prev) => prev.filter((t) => t.team_number !== num))}
-            allTeams={allTeams}
-            teamsLoading={teamsLoading}
+            onRemove={(num) => setAlliance('red', redNums.filter((n) => n !== num))}
+            season={season}
             disabledNums={disabledNums}
           />
           <TeamPicker
@@ -307,21 +240,20 @@ export default function AllianceComparePage() {
             accent="blue"
             teams={blueTeams}
             onAdd={addBlue}
-            onRemove={(num) => setBlueTeams((prev) => prev.filter((t) => t.team_number !== num))}
-            allTeams={allTeams}
-            teamsLoading={teamsLoading}
+            onRemove={(num) => setAlliance('blue', blueNums.filter((n) => n !== num))}
+            season={season}
             disabledNums={disabledNums}
           />
         </div>
 
-        {/* Comparison */}
+        {failed && <LoadError onRetry={retry} />}
+
         {!showComparison ? (
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-16 text-center text-gray-500">
             Pick teams for each alliance to compare
           </div>
         ) : (
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-            {/* Win probability */}
             {showWinProb && winProb != null && (
               <div className="mb-6">
                 <div className="flex justify-between text-sm font-semibold mb-2">
@@ -338,7 +270,6 @@ export default function AllianceComparePage() {
               </div>
             )}
 
-            {/* EPA breakdowns */}
             <div className="flex justify-between text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
               <span className="text-red-500">Red Alliance</span>
               <span className="text-blue-500">Blue Alliance</span>
