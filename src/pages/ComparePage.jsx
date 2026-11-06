@@ -133,9 +133,7 @@ function CompareView({ season }) {
           {season}/{season + 1} season · Compare EPA metrics over time
         </p>
 
-        {/* Team picker */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-5">
-          {/* Selected chips */}
           {selected.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-4">
               {selected.map((team, i) => {
@@ -182,7 +180,6 @@ function CompareView({ season }) {
 
         {failed && <LoadError onRetry={retry} />}
 
-        {/* Metric selector */}
         <div className="flex items-center gap-3 mb-6">
           <span className="text-sm text-gray-400 shrink-0">Metric</span>
           <div className="flex gap-1">
@@ -202,7 +199,6 @@ function CompareView({ season }) {
           </div>
         </div>
 
-        {/* Chart */}
         {selected.length === 0 ? (
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-16 text-center text-gray-500">
             Select at least one team to compare

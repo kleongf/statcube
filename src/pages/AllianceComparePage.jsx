@@ -8,8 +8,6 @@ import LoadError from '../components/LoadError'
 import { ALLIANCE_SIZE, parseAlliances, paramsMatch, withTeamParams } from '../lib/teamParams'
 import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
 
-// ── Math (same as TeamPage) ───────────────────────────────────────────────────
-
 function erf(x) {
   const sign = x < 0 ? -1 : 1
   const ax = Math.abs(x)
@@ -32,8 +30,6 @@ function calcRedWinProb(r1, r2, b1, b2, params) {
   return 1 - normalCDF(z)
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
-
 function TeamPicker({ label, accent, teams, onAdd, onRemove, season, disabledNums }) {
   const full = teams.length >= ALLIANCE_SIZE
 
@@ -49,7 +45,6 @@ function TeamPicker({ label, accent, teams, onAdd, onRemove, season, disabledNum
         {label}
       </h2>
 
-      {/* Selected chips */}
       <div className="flex flex-col gap-2 mb-3 min-h-[4rem]">
         {teams.map((team) => (
           <span
@@ -79,7 +74,6 @@ function TeamPicker({ label, accent, teams, onAdd, onRemove, season, disabledNum
         )}
       </div>
 
-      {/* Search */}
       {!full && (
         <TeamSearchBox
           season={season}
@@ -108,7 +102,6 @@ function StatRow({ label, redValues, blueValues }) {
         <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">{label}</span>
       </div>
       <div className="flex items-center gap-3 mb-1.5">
-        {/* Red side */}
         <div className="flex-1 text-right">
           <span className="text-red-400 font-semibold tabular-nums text-sm">
             {redSum.toFixed(2)}
@@ -121,7 +114,6 @@ function StatRow({ label, redValues, blueValues }) {
             </div>
           )}
         </div>
-        {/* Bar */}
         {hasData && (
           <div className="flex-[2] h-2 rounded-full bg-blue-500 overflow-hidden">
             <div
@@ -130,7 +122,6 @@ function StatRow({ label, redValues, blueValues }) {
             />
           </div>
         )}
-        {/* Blue side */}
         <div className="flex-1">
           <span className="text-blue-400 font-semibold tabular-nums text-sm">
             {blueSum.toFixed(2)}
@@ -147,8 +138,6 @@ function StatRow({ label, redValues, blueValues }) {
     </div>
   )
 }
-
-// ── Main page ─────────────────────────────────────────────────────────────────
 
 const STAT_COLUMNS = 'team_number, team_name, current_epa, current_auto_epa, current_teleop_epa'
 
@@ -223,7 +212,6 @@ function AllianceView({ season }) {
           {season}/{season + 1} season · Build two alliances and compare their expected performance
         </p>
 
-        {/* Alliance pickers */}
         <div className="flex gap-4 mb-6">
           <TeamPicker
             label="Red Alliance"
@@ -247,14 +235,12 @@ function AllianceView({ season }) {
 
         {failed && <LoadError onRetry={retry} />}
 
-        {/* Comparison */}
         {!showComparison ? (
           <div className="bg-gray-900 rounded-xl border border-gray-800 p-16 text-center text-gray-500">
             Pick teams for each alliance to compare
           </div>
         ) : (
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-            {/* Win probability */}
             {showWinProb && winProb != null && (
               <div className="mb-6">
                 <div className="flex justify-between text-sm font-semibold mb-2">
@@ -271,7 +257,6 @@ function AllianceView({ season }) {
               </div>
             )}
 
-            {/* EPA breakdowns */}
             <div className="flex justify-between text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
               <span className="text-red-500">Red Alliance</span>
               <span className="text-blue-500">Blue Alliance</span>
