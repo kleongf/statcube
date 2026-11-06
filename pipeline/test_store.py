@@ -16,7 +16,6 @@ def team_row(number: int) -> epa.TeamRow:
 
 
 class FakeClient:
-    """Records upserts. `errors` are raised, in order, by successive execute() calls."""
 
     def __init__(self, errors: list[Exception] | None = None) -> None:
         self.errors = list(errors or [])

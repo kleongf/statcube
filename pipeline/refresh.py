@@ -1,8 +1,3 @@
-"""Refresh one season's ratings. The core every scheduler calls, plus its CLI.
-
-    python pipeline/refresh.py run --season 2025
-    python pipeline/refresh.py run --season 2025 --dry-run [epa_2025.dry.json]
-"""
 from __future__ import annotations
 
 import argparse
@@ -27,7 +22,7 @@ logger = logging.getLogger("refresh")
 class RefreshSummary:
     season: int
     teams: int
-    matches: int  # matches rated, after dedupe and the Alliance invariant
+    matches: int
     events: int
 
     def __str__(self) -> str:
@@ -35,13 +30,6 @@ class RefreshSummary:
 
 
 def refresh_season(season: int, store: Store, *, fetch: Fetch = ftcscout.fetch_season) -> RefreshSummary:
-    """Fetch every event, replay the whole season, write every row.
-
-    Full recompute on every run. Raises before any write when a fetch fails,
-    so the table only ever holds rows computed from a complete season.
-    Running it twice, or rerunning after a crash at any point, converges to
-    the rows rate_season returns for the current upstream data.
-    """
     spec = store.season(season)
     data = fetch(spec)
     logger.info("fetched events=%d matches=%d skipped=%d", data.events, len(data.matches), data.skipped)
@@ -72,17 +60,10 @@ def main(
     fetch: Fetch | None = None,
     store: Store | None = None,
 ) -> int:
-    """0 on success. 1 on FetchFailed or a failed write. 2 on usage, MissingEnv, MaskedKey, or UnknownSeason.
-
-    Builds the store first, so a missing variable exits before any network call.
-    `fetch` and `store` are test seams. Production builds them from argv and env:
-    fetch from FTCSCOUT_GRAPHQL_URL (default ftcscout.DEFAULT_URL), store as
-    DryRunStore under --dry-run, else SupabaseStore.from_env(env).
-    Prints str(summary) as the last line on success.
-    """
+    """0 on success. 1 on FetchFailed or a failed write. 2 on usage, MissingEnv, MaskedKey, or UnknownSeason."""
     args = _parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
-    logging.getLogger("httpx").setLevel(logging.WARNING)  # one INFO line per request, about 1,500 a run
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     try:
         if store is None:
             if args.dry_run is None:

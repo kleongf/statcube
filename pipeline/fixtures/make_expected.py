@@ -1,24 +1,10 @@
-"""Regenerate epa_expected.json from matches_2025.json with the reference rating math.
-
-Run by hand when the fixture changes. It imports calculate_epa_update,
-calculate_k_factor and param_map from the untracked reference script, so it is
-the only file in pipeline/ that reaches into stats/. The tests never run it and
-never import stats/.
-
-    pipeline/.venv/bin/python pipeline/fixtures/make_expected.py
-
-The replay loop below mirrors the loop inside the reference main(), which is
-not callable on its own. Matches are ordered by the pipeline's total key
-(posted time, event code, sorted red teams, sorted blue teams), keeping the
-first duplicate, instead of the reference's thread arrival order.
-"""
 from __future__ import annotations
 
 import importlib.util
 import json
 from pathlib import Path
 
-REFERENCE = Path("/Users/kevin/VisualStudioProjects/ftc-stats/stats/epa_events.py")
+REFERENCE = Path(__file__).resolve().parents[2] / "stats" / "epa_events.py"
 FIXTURES = Path(__file__).resolve().parent
 
 

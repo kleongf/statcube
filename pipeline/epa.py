@@ -1,8 +1,3 @@
-"""Season rating domain: types and pure rating math. No I/O.
-
-Every other pipeline module imports its domain types from here. ftcscout.py
-parses wire JSON into `Match`; store.py serializes `TeamRow` into table rows.
-"""
 from __future__ import annotations
 
 import math
@@ -18,7 +13,6 @@ _NORMAL = NormalDist()
 
 @dataclass(frozen=True)
 class RatingParams:
-    """Prior mean and noise curve for one rated quantity (total or auto)."""
 
     mean: float
     a: float
@@ -41,7 +35,6 @@ class EpaParams:
 
 @dataclass(frozen=True)
 class Season:
-    """Everything the pipeline needs to know about one season."""
 
     number: int
     params: EpaParams
@@ -49,11 +42,6 @@ class Season:
 
 @dataclass(frozen=True)
 class Alliance:
-    """Two distinct on-field teams and their alliance's scores.
-
-    Invariant, enforced by ftcscout.parse_event: exactly two teams, both
-    distinct from the opposing alliance's teams, and both scores present.
-    """
 
     teams: tuple[int, int]
     total: int
@@ -62,43 +50,39 @@ class Alliance:
 
 @dataclass(frozen=True)
 class Match:
-    """One played, ratable match."""
 
     event_code: str
     posted_at: datetime
-    posted_key: str      # raw postResultTime, the history jsonb key the frontend reads
+    posted_key: str
     red: Alliance
     blue: Alliance
 
     @property
     def dedupe_key(self) -> tuple[datetime, frozenset[int]]:
-        """Same match listed under two events (divisions, combined events)."""
+        """ftcscout lists some matches under two events (2024: USIACRS1 and USIACRS2)."""
         return self.posted_at, frozenset(self.red.teams + self.blue.teams)
 
 
 @dataclass(frozen=True)
 class SeasonMatches:
-    """A complete fetch. Only constructed when every event fetched."""
 
     matches: tuple[Match, ...]
     names: Mapping[int, str]
     events: int
-    skipped: int  # played matches that failed the Alliance invariant
+    skipped: int
 
 
 @dataclass(frozen=True)
 class Point:
-    """One team's ratings right after one match, rounded to 4 decimals."""
 
     posted_key: str
     epa: float
     auto_epa: float
-    teleop_epa: float  # round(total - auto, 4), from the unrounded values
+    teleop_epa: float
 
 
 @dataclass(frozen=True)
 class Ranks:
-    """Competition ranks, starting at 1: one plus the teams strictly ahead."""
 
     epa: int
     auto_epa: int
@@ -107,11 +91,6 @@ class Ranks:
 
 @dataclass(frozen=True)
 class TeamRow:
-    """One team's season. `history` is chronological and never empty.
-
-    `current` is derived from `history`, never stored separately, so the
-    current_* columns cannot drift from the history maps.
-    """
 
     team_number: int
     team_name: str
@@ -158,11 +137,6 @@ def calculate_epa_update(
 
 
 def order_matches(matches: Sequence[Match]) -> list[Match]:
-    """Sort by a total key, then drop duplicates by `dedupe_key`, keeping the first.
-
-    Deterministic for any input order, so the same fetch always replays the same
-    way, whichever thread delivered a duplicate or a same-second tie first.
-    """
     ordered = sorted(
         matches,
         key=lambda m: (m.posted_at, m.event_code, sorted(m.red.teams), sorted(m.blue.teams)),
@@ -197,12 +171,6 @@ def _competition_ranks(values: Mapping[int, float]) -> dict[int, int]:
 
 
 def rate_season(data: SeasonMatches, params: EpaParams) -> list[TeamRow]:
-    """Replay the season and return one row per team that played a rated match, by team number.
-
-    Pure and deterministic: the same `data` and `params` give equal rows, which
-    is what makes a rerun converge. Ranks are computed on the rounded current
-    values, the ones the table stores.
-    """
     states: defaultdict[int, _TeamState] = defaultdict(lambda: _TeamState(params))
 
     for m in order_matches(data.matches):

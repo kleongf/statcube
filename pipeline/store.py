@@ -1,4 +1,3 @@
-"""The only Supabase boundary. Owns the epa_<season> row schema and season lookup."""
 from __future__ import annotations
 
 import json
@@ -16,7 +15,7 @@ from epa import EpaParams, RatingParams, Season, TeamRow
 logger = logging.getLogger(__name__)
 
 REQUIRED_ENV = ("SUPABASE_URL", "SUPABASE_SECRET_KEY")
-BATCH_ROWS = 500   # measured on epa_2025: 17 batches, mean 1.2 MB, max 1.8 MB
+BATCH_ROWS = 500
 ATTEMPTS = 3
 REQUEST_TIMEOUT_S = 120
 
@@ -48,7 +47,7 @@ class UnknownSeason(Exception):
 
 
 class WriteFailed(Exception):
-    """A batch still failed after its last attempt. Earlier batches stay written."""
+    pass
 
 
 class Store(Protocol):
@@ -58,7 +57,6 @@ class Store(Protocol):
 
 
 def builtin_season(number: int) -> Season:
-    """Raises UnknownSeason."""
     params = BUILTIN_SEASONS.get(number)
     if params is None:
         raise UnknownSeason(number)
@@ -66,7 +64,6 @@ def builtin_season(number: int) -> Season:
 
 
 def to_record(row: TeamRow) -> dict[str, Any]:
-    """TeamRow -> the epa_<season> row. The only place that knows the column names."""
     return {
         "team_number": row.team_number,
         "team_name": row.team_name,
@@ -97,7 +94,6 @@ class SupabaseStore:
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> SupabaseStore:
-        """Raises MissingEnv naming every absent variable, or MaskedKey, before any network call."""
         missing = [name for name in REQUIRED_ENV if not env.get(name)]
         if missing:
             raise MissingEnv(missing)
@@ -113,11 +109,6 @@ class SupabaseStore:
         return builtin_season(number)
 
     def write_ratings(self, season: int, rows: Sequence[TeamRow]) -> None:
-        """Upsert into epa_<season> on team_number, BATCH_ROWS per request, in team_number order.
-
-        Each batch is an idempotent full-row upsert, so a retry or a rerun after
-        a crash rewrites the same values.
-        """
         ordered = sorted(rows, key=lambda r: r.team_number)
         batches = [ordered[i:i + BATCH_ROWS] for i in range(0, len(ordered), BATCH_ROWS)]
         for number, batch in enumerate(batches, start=1):
@@ -137,7 +128,6 @@ class SupabaseStore:
 
 
 class DryRunStore:
-    """Reads seasons through `read`, writes the would-be rows to a local JSON file."""
 
     def __init__(self, path: Path, read: Callable[[int], Season] = builtin_season) -> None:
         self._path = path

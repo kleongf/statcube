@@ -18,7 +18,6 @@ def raw_events() -> dict[str, list[dict[str, Any]]]:
 
 
 class FakePost:
-    """A ftcscout.Post serving raw events, failing the first `failures[code]` requests for a code."""
 
     def __init__(self, events: Mapping[str, list[dict[str, Any]]], failures: Mapping[str, int] | None = None) -> None:
         self.events = events
@@ -41,7 +40,6 @@ class FakePost:
 
 @pytest.fixture
 def no_network(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Fail any DNS lookup or socket connect. The returned list records each attempt."""
     attempts: list[str] = []
 
     def refuse(*args: Any, **kwargs: Any) -> Any:
