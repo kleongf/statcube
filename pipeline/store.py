@@ -4,8 +4,10 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol, Sequence
+from typing import Any, Callable, Literal, Mapping, Protocol, Sequence
 
 import httpx
 from postgrest.exceptions import APIError
@@ -22,7 +24,8 @@ REQUEST_TIMEOUT_S = 120
 PRINTABLE_ASCII = re.compile(r"[!-~]+")
 
 IDEMPOTENT_READS = ("GET", "HEAD")
-SEASON_COLUMNS = "season, mean, a, p, mean_auto, a_auto, p_auto"
+SEASON_COLUMNS = "season, mean, a, p, mean_auto, a_auto, p_auto, params_refit_until"
+RUN_COLUMNS = "matches, events, finished_at"
 
 
 class MissingEnv(Exception):
@@ -49,12 +52,41 @@ class SeasonReadFailed(Exception):
         super().__init__(f"could not read season {season} from the seasons table: {cause}")
 
 
+class RunsReadFailed(Exception):
+    def __init__(self, season: int, cause: Exception | str) -> None:
+        super().__init__(f"could not read the last run of season {season} from the refresh_runs table: {cause}")
+
+
 class WriteFailed(Exception):
     pass
 
 
+RunKind = Literal["refresh", "refit"]
+
+
+class RatedFewerMatches(Exception):
+    def __init__(self, season: int, matches: int, last: Run) -> None:
+        super().__init__(
+            f"refusing to write season {season}: rated {matches} matches, fewer than the {last.matches} "
+            f"of the last successful run ({last.finished_at}). The upstream fetch may have dropped events. "
+            f"To accept the lower count, run: "
+            f"delete from refresh_runs where season = {season} and kind = 'refresh' and matches > {matches};"
+        )
+
+
+@dataclass(frozen=True)
+class Run:
+    matches: int
+    events: int
+    finished_at: str
+
+
 class Store(Protocol):
     def season(self, number: int) -> Season: ...
+
+    def last_run(self, season: int, kind: RunKind = "refresh") -> Run | None: ...
+
+    def record_run(self, season: int, matches: int, events: int, kind: RunKind = "refresh") -> None: ...
 
     def update_season_params(self, season: int, params: EpaParams) -> None: ...
 
@@ -68,6 +100,7 @@ def season_from_row(row: Mapping[str, Any]) -> Season:
             RatingParams(row["mean"], row["a"], row["p"]),
             RatingParams(row["mean_auto"], row["a_auto"], row["p_auto"]),
         ),
+        date.fromisoformat(row["params_refit_until"]) if row.get("params_refit_until") else None,
     )
 
 
@@ -157,6 +190,26 @@ class SupabaseStore:
         except (TypeError, KeyError) as exc:
             raise SeasonReadFailed(number, f"malformed row ({exc!r})") from exc
 
+    def last_run(self, season: int, kind: RunKind = "refresh") -> Run | None:
+        try:
+            rows = (
+                self._client.table("refresh_runs").select(RUN_COLUMNS).eq("season", season).eq("kind", kind)
+                .order("finished_at", desc=True).limit(1).execute().data
+            )
+        except (APIError, httpx.HTTPError) as exc:
+            raise RunsReadFailed(season, exc) from exc
+        if not isinstance(rows, list):
+            raise RunsReadFailed(season, f"expected a JSON array, got {type(rows).__name__}")
+        return Run(rows[0]["matches"], rows[0]["events"], rows[0]["finished_at"]) if rows else None
+
+    def record_run(self, season: int, matches: int, events: int, kind: RunKind = "refresh") -> None:
+        try:
+            self._client.table("refresh_runs").insert(
+                {"season": season, "kind": kind, "matches": matches, "events": events},
+            ).execute()
+        except Exception as exc:
+            raise WriteFailed(f"refresh_runs row for season {season}: {redact(str(exc), self._secret)}") from exc
+
     def update_season_params(self, season: int, params: EpaParams) -> None:
         values = {
             "mean": params.total.mean, "a": params.total.a, "p": params.total.p,
@@ -191,13 +244,22 @@ class SupabaseStore:
 
 class DryRunStore:
 
-    def __init__(self, path: Path, read: Callable[[int], Season]) -> None:
+    def __init__(
+        self, path: Path, read: Callable[[int], Season], read_last_run: Callable[[int, RunKind], Run | None] = lambda *_: None,
+    ) -> None:
         self._path = path
         self._read = read
+        self._read_last_run = read_last_run
         self.season_params: dict[int, EpaParams] = {}
 
     def season(self, number: int) -> Season:
         return self._read(number)
+
+    def last_run(self, season: int, kind: RunKind = "refresh") -> Run | None:
+        return self._read_last_run(season, kind)
+
+    def record_run(self, season: int, matches: int, events: int, kind: RunKind = "refresh") -> None:
+        logger.info("dry run: would record season %d %s run: matches=%d events=%d", season, kind, matches, events)
 
     def update_season_params(self, season: int, params: EpaParams) -> None:
         self._read(season)

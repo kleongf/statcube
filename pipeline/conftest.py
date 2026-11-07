@@ -64,9 +64,11 @@ def read_seasons(number: int) -> Season:
 
 
 class FakeClient:
-    def __init__(self, errors: list[Exception] | None = None, seasons: list[dict] | None = None) -> None:
+    def __init__(self, errors: list[Exception] | None = None, seasons: list[dict] | None = None, runs: list[dict] | None = None) -> None:
         self.errors = list(errors or [])
         self.seasons = list(seasons or [])
+        self.runs = list(runs or [])
+        self.inserts: list[tuple[str, dict]] = []
         self.upserts: list[tuple[str, list[dict], dict]] = []
         self.selects: list[tuple[str, dict]] = []
         self._table = ""
@@ -74,6 +76,9 @@ class FakeClient:
         self._filters: dict[str, Any] = {}
         self._selecting = False
         self._updating: dict | None = None
+        self._inserting: dict | None = None
+        self._order: tuple[str, bool] | None = None
+        self._limit: int | None = None
         self._columns: list[str] = []
 
     def table(self, name: str) -> FakeClient:
@@ -81,10 +86,25 @@ class FakeClient:
         self._filters = {}
         self._selecting = False
         self._updating = None
+        self._inserting = None
+        self._order = None
+        self._limit = None
         return self
 
     def upsert(self, records: list[dict], **kwargs) -> FakeClient:
         self._pending = (records, kwargs)
+        return self
+
+    def insert(self, record: dict) -> FakeClient:
+        self._inserting = record
+        return self
+
+    def order(self, column: str, desc: bool = False) -> FakeClient:
+        self._order = (column, desc)
+        return self
+
+    def limit(self, count: int) -> FakeClient:
+        self._limit = count
         return self
 
     def update(self, values: dict) -> FakeClient:
@@ -105,9 +125,16 @@ class FakeClient:
             raise self.errors.pop(0)
         if self._selecting:
             self.selects.append((self._table, dict(self._filters)))
-            matching = [r for r in self.seasons if all(r[k] == v for k, v in self._filters.items())]
-            rows = [{c: r[c] for c in self._columns} for r in matching]
+            source = self.runs if self._table == "refresh_runs" else self.seasons
+            matching = [r for r in source if all(r.get(k) == v for k, v in self._filters.items())]
+            if self._order:
+                column, desc = self._order
+                matching.sort(key=lambda r: r[column], reverse=desc)
+            rows = [{c: r.get(c) for c in self._columns} for r in matching[: self._limit]]
             return SimpleNamespace(data=rows)
+        if self._inserting is not None:
+            self.inserts.append((self._table, self._inserting))
+            return SimpleNamespace(data=[self._inserting])
         if self._updating is not None:
             matching = [r for r in self.seasons if all(r[k] == v for k, v in self._filters.items())]
             for r in matching:
