@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigationType, useParams, useSearchParams } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
 import SortableTeamsTable from '../components/SortableTeamsTable'
@@ -35,6 +35,11 @@ function writeView({ sort, dir, pageSize, page, q }) {
   return params
 }
 
+function seasonPath(season, view) {
+  const query = writeView({ ...view, page: 1 }).toString()
+  return `/teams/${season}${query ? `?${query}` : ''}`
+}
+
 export default function TeamsPage() {
   const { season: seasonParam } = useParams()
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
@@ -42,11 +47,13 @@ export default function TeamsPage() {
   const view = readView(searchParams)
   const { sort, dir, pageSize, page, q } = view
 
+  const location = useLocation()
+  const navigationType = useNavigationType()
   const [draft, setDraft] = useState(q)
-  const [syncedQ, setSyncedQ] = useState(q)
-  if (q !== syncedQ) {
-    setSyncedQ(q)
-    setDraft(q)
+  const [synced, setSynced] = useState({ key: location.key, q })
+  if (location.key !== synced.key) {
+    setSynced({ key: location.key, q })
+    if (navigationType === 'POP' || q !== synced.q) setDraft(q)
   }
 
   function update(changes, { replace = false } = {}) {
@@ -54,23 +61,24 @@ export default function TeamsPage() {
   }
 
   useEffect(() => {
-    if (draft === q) return
+    if (draft.trim() === q.trim()) return
     const timer = setTimeout(() => {
-      setSyncedQ(draft)
-      setSearchParams(writeView({ ...view, q: draft, page: 1 }), { replace: true })
+      setSearchParams(writeView({ sort, dir, pageSize, page: 1, q: draft }), { replace: true })
     }, SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  })
+  }, [draft, q, sort, dir, pageSize, setSearchParams])
 
   const key = `${season}|${sort}|${dir}|${pageSize}|${page}|${q.trim()}`
   const [settled, setSettled] = useState({ key: null, rows: [], total: 0 })
-  const [failed, setFailed] = useState({ key: null, message: '' })
+  const [failed, setFailed] = useState(null)
 
   useEffect(() => {
     let live = true
     fetchTeamsPage({ season, sort, dir, search: q, page, pageSize }).then(
       ({ rows, total }) => {
-        if (live) setSettled({ key, rows, total })
+        if (!live) return
+        setSettled({ key, rows, total })
+        setFailed(null)
       },
       (err) => {
         if (!live) return
@@ -85,15 +93,15 @@ export default function TeamsPage() {
     return () => { live = false }
   }, [key, season, sort, dir, q, page, pageSize, setSearchParams])
 
-  const loading = settled.key !== key && failed.key !== key
-  const error = failed.key === key ? failed.message : null
+  const error = failed?.key === key ? failed.message : null
+  const loading = settled.key !== key && !error
   const { rows, total } = settled
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const rankKey = TEAM_SORTS[sort].rank
   const rankMap = Object.fromEntries(rows.map((t) => [t.team_number, t[rankKey]]))
   const firstShown = (page - 1) * pageSize + 1
   const lastShown = Math.min(page * pageSize, total)
-  const showTable = !error && (settled.key !== null)
+  const showControls = settled.key !== null || error
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
@@ -101,7 +109,7 @@ export default function TeamsPage() {
       <div className="max-w-5xl mx-auto p-6">
         <div className="flex items-start justify-between mb-1">
           <h1 className="text-3xl font-bold text-white">Team Rankings</h1>
-          <SeasonSelect season={season} getPath={(s) => `/teams/${s}`} />
+          <SeasonSelect season={season} getPath={(s) => seasonPath(s, { sort, dir, pageSize, q: draft })} />
         </div>
         <p className="text-gray-400 mb-6 text-sm">{season}/{season + 1} season · Ranked by Expected Points Added (EPA)</p>
 
@@ -145,10 +153,10 @@ export default function TeamsPage() {
           </div>
         )}
 
-        {showTable && (
+        {showControls && (
           <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
             <SortableTeamsTable
-              teams={rows}
+              teams={error ? [] : rows}
               season={season}
               rankMap={rankMap}
               sortKey={TEAM_SORTS[sort].column}
@@ -160,7 +168,7 @@ export default function TeamsPage() {
 
             <div className="flex items-center justify-between mt-4 text-sm text-gray-400">
               <span>
-                {total === 0
+                {error ? '' : total === 0
                   ? 'No results'
                   : `${firstShown.toLocaleString()}-${lastShown.toLocaleString()} of ${total.toLocaleString()} teams`}
               </span>
@@ -177,7 +185,7 @@ export default function TeamsPage() {
                 </span>
                 <button
                   onClick={() => update({ page: page + 1 })}
-                  disabled={page >= totalPages}
+                  disabled={!error && page >= totalPages}
                   className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
                   Next →
