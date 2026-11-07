@@ -374,7 +374,6 @@ export default function TeamPage() {
 
   // teamNumber -> sorted [{ms, value}] EPA lookup
   const [teamEpas, setTeamEpas] = useState({})
-  const [ranks, setRanks] = useState(null)
   const [totalTeams, setTotalTeams] = useState(null)
 
   useEffect(() => {
@@ -392,23 +391,14 @@ export default function TeamPage() {
   }, [teamNumber, season])
 
   useEffect(() => {
-    if (!team) return
-    async function fetchRanks() {
-      const [epaRes, autoRes, telepRes, totalRes] = await Promise.all([
-        supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }).gt('current_epa', team.current_epa),
-        supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }).gt('current_auto_epa', team.current_auto_epa),
-        supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }).gt('current_teleop_epa', team.current_teleop_epa),
-        supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true }),
-      ])
-      setRanks({
-        epa: (epaRes.count ?? 0) + 1,
-        auto: (autoRes.count ?? 0) + 1,
-        teleop: (telepRes.count ?? 0) + 1,
-      })
-      setTotalTeams(totalRes.count ?? null)
+    async function fetchTotal() {
+      const { count } = await supabase.from(`epa_${season}`).select('*', { count: 'exact', head: true })
+      setTotalTeams(count ?? null)
     }
-    fetchRanks()
-  }, [team, season])
+    fetchTotal()
+  }, [season])
+
+  const ranks = team && { epa: team.rank_epa, auto: team.rank_auto_epa, teleop: team.rank_teleop_epa }
 
   useEffect(() => {
     async function fetchMatches() {

@@ -40,6 +40,28 @@ export async function searchTeams(season, query, { limit = 10, exclude = [] } = 
   return data
 }
 
+export const TEAM_SORTS = {
+  epa: { column: 'current_epa', rank: 'rank_epa' },
+  auto: { column: 'current_auto_epa', rank: 'rank_auto_epa' },
+  teleop: { column: 'current_teleop_epa', rank: 'rank_teleop_epa' },
+}
+
+const PAGE_COLUMNS =
+  'team_number, team_name, current_epa, current_auto_epa, current_teleop_epa, rank_epa, rank_auto_epa, rank_teleop_epa'
+
+export async function fetchTeamsPage({ season, sort, dir, search = '', page, pageSize }) {
+  const q = search.trim()
+  const from = (page - 1) * pageSize
+  let request = supabase.from(`epa_${season}`).select(PAGE_COLUMNS, { count: 'exact' })
+  if (q) request = request.or(teamFilter(q))
+  const { data, error, count } = await request
+    .order(TEAM_SORTS[sort].column, { ascending: dir === 'asc', nullsFirst: false })
+    .order('team_number')
+    .range(from, from + pageSize - 1)
+  if (error) throw error
+  return { rows: data, total: count }
+}
+
 export async function fetchTeamsByNumber(season, numbers, columns = PICKER_COLUMNS) {
   if (numbers.length === 0) return []
   const { data, error } = await supabase

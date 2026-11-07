@@ -1,95 +1,107 @@
-import { useEffect, useState, useMemo } from 'react'
-import { useParams } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigationType, useParams, useSearchParams } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import SeasonSelect from '../components/SeasonSelect'
 import SortableTeamsTable from '../components/SortableTeamsTable'
 import { CURRENT_SEASON } from '../lib/constants'
+import { TEAM_SORTS, fetchTeamsPage } from '../lib/teams'
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+const DEFAULT_PAGE_SIZE = 20
+const SEARCH_DEBOUNCE_MS = 250
+const RANGE_NOT_SATISFIABLE = 'PGRST103'
+
+const SORT_BY_COLUMN = Object.fromEntries(
+  Object.entries(TEAM_SORTS).map(([sort, { column }]) => [column, sort]),
+)
+
+function readView(params) {
+  const sort = params.get('sort') in TEAM_SORTS ? params.get('sort') : 'epa'
+  const dir = params.get('dir') === 'asc' ? 'asc' : 'desc'
+  const pageSize = PAGE_SIZE_OPTIONS.includes(Number(params.get('pageSize')))
+    ? Number(params.get('pageSize'))
+    : DEFAULT_PAGE_SIZE
+  const page = Math.max(1, parseInt(params.get('page'), 10) || 1)
+  return { sort, dir, pageSize, page, q: params.get('q') ?? '' }
+}
+
+function writeView({ sort, dir, pageSize, page, q }) {
+  const params = new URLSearchParams()
+  if (q.trim()) params.set('q', q)
+  if (sort !== 'epa') params.set('sort', sort)
+  if (dir !== 'desc') params.set('dir', dir)
+  if (pageSize !== DEFAULT_PAGE_SIZE) params.set('pageSize', String(pageSize))
+  if (page > 1) params.set('page', String(page))
+  return params
+}
+
+function seasonPath(season, view) {
+  const query = writeView({ ...view, page: 1 }).toString()
+  return `/teams/${season}${query ? `?${query}` : ''}`
+}
 
 export default function TeamsPage() {
   const { season: seasonParam } = useParams()
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const view = readView(searchParams)
+  const { sort, dir, pageSize, page, q } = view
 
-  const [allTeams, setAllTeams] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const location = useLocation()
+  const navigationType = useNavigationType()
+  const [draft, setDraft] = useState(q)
+  const [synced, setSynced] = useState({ key: location.key, q })
+  if (location.key !== synced.key) {
+    setSynced({ key: location.key, q })
+    if (navigationType === 'POP' || q !== synced.q) setDraft(q)
+  }
 
-  const [search, setSearch] = useState('')
-  const [sortKey, setSortKey] = useState('current_epa')
-  const [sortDir, setSortDir] = useState('desc')
-  const [pageSize, setPageSize] = useState(20)
-  const [page, setPage] = useState(1)
+  function update(changes, { replace = false } = {}) {
+    setSearchParams(writeView({ ...view, ...changes }), { replace })
+  }
 
   useEffect(() => {
-    setAllTeams([])
-    setLoading(true)
-    setError(null)
+    if (draft.trim() === q.trim()) return
+    const timer = setTimeout(() => {
+      setSearchParams(writeView({ sort, dir, pageSize, page: 1, q: draft }), { replace: true })
+    }, SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [draft, q, sort, dir, pageSize, setSearchParams])
 
-    async function fetchTeams() {
-      const BATCH = 1000
-      let from = 0
-      const rows = []
+  const key = `${season}|${sort}|${dir}|${pageSize}|${page}|${q.trim()}`
+  const [settled, setSettled] = useState({ key: null, rows: [], total: 0 })
+  const [failed, setFailed] = useState(null)
 
-      while (true) {
-        const { data, error } = await supabase
-          .from(`epa_${season}`)
-          .select('team_number, team_name, current_epa, current_auto_epa, current_teleop_epa')
-          .range(from, from + BATCH - 1)
-
-        if (error) {
-          setError(error.message)
-          setLoading(false)
+  useEffect(() => {
+    let live = true
+    fetchTeamsPage({ season, sort, dir, search: q, page, pageSize }).then(
+      ({ rows, total }) => {
+        if (!live) return
+        setSettled({ key, rows, total })
+        setFailed(null)
+      },
+      (err) => {
+        if (!live) return
+        if (err.code === RANGE_NOT_SATISFIABLE && page > 1) {
+          setSearchParams(writeView({ sort, dir, pageSize, page: 1, q }), { replace: true })
           return
         }
-
-        rows.push(...data)
-        if (data.length < BATCH) break
-        from += BATCH
-      }
-
-      setAllTeams(rows)
-      setLoading(false)
-    }
-    fetchTeams()
-  }, [season])
-
-  // Reset to page 1 whenever search, sort, or page size changes
-  useEffect(() => { setPage(1) }, [search, sortKey, sortDir, pageSize])
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return allTeams
-    return allTeams.filter(
-      (t) =>
-        String(t.team_number).includes(q) ||
-        (t.team_name ?? '').toLowerCase().includes(q),
+        console.error('Teams page failed', err)
+        setFailed({ key, message: err.message })
+      },
     )
-  }, [allTeams, search])
+    return () => { live = false }
+  }, [key, season, sort, dir, q, page, pageSize, setSearchParams])
 
-  const sorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
-      const av = a[sortKey] ?? -Infinity
-      const bv = b[sortKey] ?? -Infinity
-      return sortDir === 'asc' ? av - bv : bv - av
-    })
-  }, [filtered, sortKey, sortDir])
-
-  // Rank within the full dataset, unaffected by search filter
-  const globalRanks = useMemo(() => {
-    const fullSorted = [...allTeams].sort((a, b) => {
-      const av = a[sortKey] ?? -Infinity
-      const bv = b[sortKey] ?? -Infinity
-      return sortDir === 'asc' ? av - bv : bv - av
-    })
-    const ranks = {}
-    fullSorted.forEach((team, i) => { ranks[team.team_number] = i + 1 })
-    return ranks
-  }, [allTeams, sortKey, sortDir])
-
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize))
-  const pageRows = sorted.slice((page - 1) * pageSize, page * pageSize)
+  const error = failed?.key === key ? failed.message : null
+  const loading = settled.key !== key && !error
+  const { rows, total } = settled
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const rankKey = TEAM_SORTS[sort].rank
+  const rankMap = Object.fromEntries(rows.map((t) => [t.team_number, t[rankKey]]))
+  const firstShown = (page - 1) * pageSize + 1
+  const lastShown = Math.min(page * pageSize, total)
+  const showControls = settled.key !== null || error
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
@@ -97,17 +109,16 @@ export default function TeamsPage() {
       <div className="max-w-5xl mx-auto p-6">
         <div className="flex items-start justify-between mb-1">
           <h1 className="text-3xl font-bold text-white">Team Rankings</h1>
-          <SeasonSelect season={season} getPath={(s) => `/teams/${s}`} />
+          <SeasonSelect season={season} getPath={(s) => seasonPath(s, { sort, dir, pageSize, q: draft })} />
         </div>
         <p className="text-gray-400 mb-6 text-sm">{season}/{season + 1} season · Ranked by Expected Points Added (EPA)</p>
 
-        {/* Controls row */}
         <div className="flex flex-col sm:flex-row gap-3 mb-5">
           <input
             type="text"
             placeholder="Search team name or number…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
             className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
           />
           <div className="flex items-center gap-2 shrink-0">
@@ -116,7 +127,7 @@ export default function TeamsPage() {
               {PAGE_SIZE_OPTIONS.map((n) => (
                 <button
                   key={n}
-                  onClick={() => setPageSize(n)}
+                  onClick={() => update({ pageSize: n, page: 1 })}
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                     pageSize === n
                       ? 'bg-blue-600 text-white'
@@ -136,33 +147,34 @@ export default function TeamsPage() {
           </div>
         )}
 
-        {loading && (
+        {settled.key === null && loading && (
           <div className="flex items-center justify-center py-20 text-gray-500">
             Loading teams…
           </div>
         )}
 
-        {!loading && !error && (
-          <>
+        {showControls && (
+          <div className={loading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
             <SortableTeamsTable
-              teams={pageRows}
+              teams={error ? [] : rows}
               season={season}
-              rankMap={globalRanks}
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onSortChange={(key, dir) => { setSortKey(key); setSortDir(dir) }}
+              rankMap={rankMap}
+              sortKey={TEAM_SORTS[sort].column}
+              sortDir={dir}
+              onSortChange={(column, nextDir) =>
+                update({ sort: SORT_BY_COLUMN[column], dir: nextDir, page: 1 })
+              }
             />
 
-            {/* Pagination footer */}
             <div className="flex items-center justify-between mt-4 text-sm text-gray-400">
               <span>
-                {sorted.length === 0
+                {error ? '' : total === 0
                   ? 'No results'
-                  : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, sorted.length)} of ${sorted.length} teams`}
+                  : `${firstShown.toLocaleString()}-${lastShown.toLocaleString()} of ${total.toLocaleString()} teams`}
               </span>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setPage((p) => p - 1)}
+                  onClick={() => update({ page: page - 1 })}
                   disabled={page === 1}
                   className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
@@ -172,15 +184,15 @@ export default function TeamsPage() {
                   {page} / {totalPages}
                 </span>
                 <button
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={page === totalPages}
+                  onClick={() => update({ page: page + 1 })}
+                  disabled={!error && page >= totalPages}
                   className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
                   Next →
                 </button>
               </div>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>
