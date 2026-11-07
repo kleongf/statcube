@@ -77,11 +77,6 @@ def values(params: epa.EpaParams) -> tuple[float, float, float, float, float, fl
 
 
 def bin_residuals(pairs: Sequence[tuple[float, float]]) -> tuple[Bin, ...]:
-    """Each alliance splits its weight between the two bins whose centres bracket its log rating.
-
-    A small change in a rating then moves the bin statistics a little instead of moving the whole alliance into the
-    next bin, so a replay with nearly equal a and p gives nearly equal bins and the fixed-point loop can settle.
-    """
     groups: dict[int, list[tuple[float, float, float]]] = {}
     for predicted, actual in pairs:
         rating = epa.model_rating(predicted)
@@ -143,11 +138,6 @@ def _rounded(params: epa.EpaParams) -> epa.EpaParams:
 
 
 def fit_season(data: epa.SeasonMatches, prior: epa.EpaParams, window: Window = Window()) -> Fit:
-    """The full bins are chosen once, from the replay with the prior's a and p, and held through every round.
-
-    Choosing them each round let a bin near MIN_BIN_ALLIANCES drop in and out, and the full 2025 season alternated
-    between two fits forever.
-    """
     rated = [m for m in epa.order_matches(data.matches) if m.posted_at.date() in window]
     if not rated:
         raise NoMatches(f"no rated matches in {window}")

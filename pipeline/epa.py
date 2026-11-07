@@ -80,7 +80,6 @@ class Prediction:
 
 
 Observer = Callable[[Match, Prediction, Prediction], None]
-"""Receives each rated match with the red and blue predictions made before it was played."""
 
 
 @dataclass(frozen=True)
