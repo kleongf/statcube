@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 const fetchMock = vi.fn()
 let searchTeams
 let fetchTeamsByNumber
+let fetchTeamsPage
 
 function lastRequest() {
   const [input] = fetchMock.mock.calls.at(-1)
@@ -13,7 +14,7 @@ beforeAll(async () => {
   vi.stubEnv('VITE_SUPABASE_URL', 'http://supabase.test')
   vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'test-key')
   vi.stubGlobal('fetch', fetchMock)
-  ;({ searchTeams, fetchTeamsByNumber } = await import('./teams'))
+  ;({ searchTeams, fetchTeamsByNumber, fetchTeamsPage } = await import('./teams'))
 })
 
 beforeEach(() => {
@@ -165,5 +166,59 @@ describe('fetchTeamsByNumber', () => {
   it('sends no request for an empty list', async () => {
     expect(await fetchTeamsByNumber(2025, [])).toEqual([])
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('fetchTeamsPage', () => {
+  const base = { season: 2025, sort: 'epa', dir: 'desc', page: 1, pageSize: 20 }
+
+  it('asks for one sorted, counted page in a single request', async () => {
+    fetchMock.mockImplementation(async () =>
+      new Response(JSON.stringify([{ team_number: 111 }]), {
+        status: 200,
+        headers: { 'content-type': 'application/json', 'content-range': '80-99/8317' },
+      }),
+    )
+    const result = await fetchTeamsPage({ ...base, page: 5 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [input, init] = fetchMock.mock.calls[0]
+    const url = new URL(typeof input === 'string' ? input : input.url)
+    const headers = new Headers(init?.headers ?? input.headers)
+    expect(url.pathname).toBe('/rest/v1/epa_2025')
+    expect(url.searchParams.get('order')).toBe('current_epa.desc.nullslast,team_number.asc')
+    expect(url.searchParams.get('offset')).toBe('80')
+    expect(url.searchParams.get('limit')).toBe('20')
+    expect(headers.get('prefer')).toContain('count=exact')
+    expect(url.searchParams.get('select')).toContain('rank_epa')
+    expect(result).toEqual({ rows: [{ team_number: 111 }], total: 8317 })
+  })
+
+  it('sorts ascending by the chosen column', async () => {
+    await fetchTeamsPage({ ...base, sort: 'auto', dir: 'asc' })
+    expect(lastRequest().searchParams.get('order')).toBe('current_auto_epa.asc.nullslast,team_number.asc')
+  })
+
+  it('filters a numeric search on team_number and a text search on team_name', async () => {
+    await fetchTeamsPage({ ...base, search: '11115' })
+    expect(orFilter()).toContain('team_number.eq.11115')
+    expect(orFilter()).toContain('team_name.imatch."11115"')
+
+    await fetchTeamsPage({ ...base, search: 'robot' })
+    expect(orFilter()).toBe('(team_name.imatch."robot")')
+  })
+
+  it('adds no filter for a blank search', async () => {
+    await fetchTeamsPage({ ...base, search: '  ' })
+    expect(lastRequest().searchParams.has('or')).toBe(false)
+  })
+
+  it('throws when the request fails', async () => {
+    fetchMock.mockImplementation(async () =>
+      new Response(JSON.stringify({ message: 'boom' }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      }),
+    )
+    await expect(fetchTeamsPage(base)).rejects.toMatchObject({ message: 'boom' })
   })
 })
