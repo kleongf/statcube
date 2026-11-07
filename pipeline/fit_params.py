@@ -7,7 +7,7 @@ import os
 import sys
 import traceback
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from enum import Enum, auto
 from functools import partial
 from statistics import fmean
@@ -225,6 +225,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--from", dest="start", type=date.fromisoformat, metavar="DATE")
     parser.add_argument("--to", dest="end", type=date.fromisoformat, metavar="DATE")
     parser.add_argument("--write", action="store_true", help="write the fitted values to the season's seasons row")
+    parser.add_argument(
+        "--min-new-matches",
+        type=int,
+        default=0,
+        metavar="N",
+        help="with --write, skip the write (exit 0) unless the fit rates at least N more matches than the last recorded refit",
+    )
+    parser.add_argument(
+        "--if-open",
+        action="store_true",
+        help="exit 0 without fitting unless today (UTC) is before the season's params_refit_until; a null date means frozen",
+    )
     return parser
 
 
@@ -234,6 +246,7 @@ def main(
     env: Mapping[str, str] = os.environ,
     fetch: Fetch | None = None,
     store: Store | None = None,
+    today: date | None = None,
 ) -> int:
     args = _parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
@@ -248,6 +261,11 @@ def main(
         fetch = fetch or partial(ftcscout.fetch_season, post=ftcscout.http_post(env.get("FTCSCOUT_GRAPHQL_URL", ftcscout.DEFAULT_URL)))
         if args.write:
             store.season(args.season)
+        if args.if_open:
+            until = store.season(args.season).refit_until
+            if until is None or (today or datetime.now(timezone.utc).date()) >= until:
+                print(f"season {args.season} parameters are frozen (params_refit_until {until}); not refitting")
+                return 0
         prior = _prior(store, args.season)
         data = fetch(epa.Season(args.season, prior.params))
         window = Window(args.start, args.end)
@@ -259,7 +277,14 @@ def main(
         if reason := refusal(fit):
             fail(f"error: refusing to write seasons row {args.season}: {reason}")
             return 1
+        if args.min_new_matches:
+            last = store.last_run(args.season, "refit")
+            new = fit.matches - (last.matches if last else 0)
+            if new < args.min_new_matches:
+                print(f"skipped refit: {new} new matches (need {args.min_new_matches})")
+                return 0
         store.update_season_params(args.season, fit.params)
+        store.record_run(args.season, fit.matches, data.events, "refit")
         print(f"wrote seasons row {args.season}")
     except (MissingEnv, InvalidEnv, UnknownSeason) as exc:
         fail(f"error: {exc}")

@@ -4,7 +4,7 @@ import math
 from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from statistics import NormalDist
 from typing import Callable, Mapping, Sequence
 
@@ -38,6 +38,7 @@ class Season:
 
     number: int
     params: EpaParams
+    refit_until: date | None = None
 
 
 @dataclass(frozen=True)

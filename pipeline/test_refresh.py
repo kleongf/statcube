@@ -16,8 +16,16 @@ from conftest import FakeClient, FakePost, read_seasons
 
 
 class RecordingStore:
-    def __init__(self) -> None:
+    def __init__(self, last: store.Run | None = None) -> None:
         self.writes: list[tuple[int, Sequence[epa.TeamRow]]] = []
+        self.last = last
+        self.recorded: list[tuple[int, int, int]] = []
+
+    def last_run(self, season: int, kind: store.RunKind = "refresh") -> store.Run | None:
+        return self.last
+
+    def record_run(self, season: int, matches: int, events: int, kind: store.RunKind = "refresh") -> None:
+        self.recorded.append((season, matches, events))
 
     def season(self, number: int) -> epa.Season:
         return read_seasons(number)
@@ -157,7 +165,7 @@ def test_dry_run_reads_the_parameters_from_supabase_not_from_a_constant(raw_even
     code = refresh.main(["run", "--season", "2025", "--dry-run", str(path)], env={}, fetch=fetch_from(FakePost(raw_events)))
 
     assert code == 0
-    assert client.selects == [("seasons", {"season": 2025})]
+    assert client.selects == [("seasons", {"season": 2025}), ("refresh_runs", {"season": 2025, "kind": "refresh"})]
     assert client.upserts == []
     assert len(json.loads(path.read_text())) == 14
 
@@ -192,3 +200,64 @@ def test_an_html_page_on_a_200_seasons_read_exits_1_with_one_line(capsys):
 
     assert code == 1
     assert capsys.readouterr().err.splitlines() == ["error: could not read season 2025 from the seasons table: expected a JSON array, got str"]
+
+
+def run_of(matches: int) -> store.Run:
+    return store.Run(matches, 2, "2026-11-06T09:00:00+00:00")
+
+
+def test_a_clean_run_records_its_season_matches_and_events(raw_events):
+    sink = RecordingStore(last=run_of(21))
+
+    code = refresh.main(["run", "--season", "2025"], fetch=fetch_from(FakePost(raw_events)), store=sink)
+
+    assert code == 0
+    assert sink.recorded == [(2025, 21, 2)]
+
+
+def test_a_run_that_rates_fewer_matches_than_the_last_one_exits_1_and_writes_nothing(raw_events, capsys):
+    sink = RecordingStore(last=run_of(22))
+
+    code = refresh.main(["run", "--season", "2025"], fetch=fetch_from(FakePost(raw_events)), store=sink)
+
+    assert code == 1
+    assert sink.writes == []
+    assert sink.recorded == []
+    err = capsys.readouterr().err
+    assert "rated 21 matches, fewer than the 22" in err
+    assert "refresh_runs" in err
+
+
+def test_a_failed_write_records_no_run(raw_events):
+    class FailingStore(RecordingStore):
+        def write_ratings(self, season, rows):
+            raise store.WriteFailed("boom")
+
+    sink = FailingStore()
+
+    assert refresh.main(["run", "--season", "2025"], fetch=fetch_from(FakePost(raw_events)), store=sink) == 1
+    assert sink.recorded == []
+
+
+def test_supabase_store_reads_the_latest_run_and_records_a_new_one():
+    client = FakeClient(runs=[
+        {"season": 2025, "kind": "refresh", "matches": 10, "events": 1, "finished_at": "2026-11-05T00:00:00+00:00"},
+        {"season": 2025, "kind": "refresh", "matches": 21, "events": 2, "finished_at": "2026-11-06T00:00:00+00:00"},
+        {"season": 2025, "kind": "refit", "matches": 77, "events": 2, "finished_at": "2026-11-07T00:00:00+00:00"},
+        {"season": 2024, "kind": "refresh", "matches": 99, "events": 9, "finished_at": "2026-11-07T00:00:00+00:00"},
+    ])
+    sut = store.SupabaseStore(client)
+
+    assert sut.last_run(2025) == store.Run(21, 2, "2026-11-06T00:00:00+00:00")
+    assert sut.last_run(2023) is None
+    sut.record_run(2025, 30, 3)
+    assert client.inserts == [("refresh_runs", {"season": 2025, "kind": "refresh", "matches": 30, "events": 3})]
+
+
+def test_dry_run_reads_the_last_run_but_records_nothing(raw_events, tmp_path):
+    sut = store.DryRunStore(tmp_path / "rows.json", read_seasons, lambda season, kind: run_of(99))
+
+    code = refresh.main(["run", "--season", "2025"], fetch=fetch_from(FakePost(raw_events)), store=sut)
+
+    assert code == 1
+    assert not (tmp_path / "rows.json").exists()

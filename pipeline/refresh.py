@@ -12,7 +12,9 @@ from typing import Callable, Mapping, Sequence
 
 import epa
 import ftcscout
-from store import DryRunStore, InvalidEnv, MissingEnv, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed, redact
+from store import (
+    DryRunStore, InvalidEnv, MissingEnv, RatedFewerMatches, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed, redact,
+)
 
 Fetch = Callable[[epa.Season], epa.SeasonMatches]
 
@@ -35,8 +37,13 @@ def refresh_season(season: int, store: Store, *, fetch: Fetch = ftcscout.fetch_s
     data = fetch(spec)
     logger.info("fetched events=%d matches=%d skipped=%d", data.events, len(data.matches), data.skipped)
     rows = epa.rate_season(data, spec.params)
+    matches = len(epa.order_matches(data.matches))
+    last = store.last_run(season)
+    if last and matches < last.matches:
+        raise RatedFewerMatches(season, matches, last)
     store.write_ratings(season, rows)
-    return RefreshSummary(season, len(rows), len(epa.order_matches(data.matches)), data.events)
+    store.record_run(season, matches, data.events)
+    return RefreshSummary(season, len(rows), matches, data.events)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -75,7 +82,8 @@ def main(
             if args.dry_run is None:
                 store = SupabaseStore.from_env(env)
             else:
-                store = DryRunStore(Path(args.dry_run or f"epa_{args.season}.dry.json"), SupabaseStore.from_env(env).season)
+                live = SupabaseStore.from_env(env)
+                store = DryRunStore(Path(args.dry_run or f"epa_{args.season}.dry.json"), live.season, live.last_run)
         if fetch is None:
             fetch = partial(ftcscout.fetch_season, post=ftcscout.http_post(env.get("FTCSCOUT_GRAPHQL_URL", ftcscout.DEFAULT_URL)))
         summary = refresh_season(args.season, store, fetch=fetch)
@@ -87,7 +95,7 @@ def main(
         for code, message in sorted(exc.failures.items()):
             fail(f"  {code}: {message}")
         return 1
-    except (SeasonReadFailed, WriteFailed) as exc:
+    except (SeasonReadFailed, WriteFailed, RatedFewerMatches) as exc:
         fail(f"error: {exc}")
         return 1
     except Exception:
