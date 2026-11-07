@@ -73,16 +73,22 @@ class FakeClient:
         self._pending: tuple[list[dict], dict] = ([], {})
         self._filters: dict[str, Any] = {}
         self._selecting = False
+        self._updating: dict | None = None
         self._columns: list[str] = []
 
     def table(self, name: str) -> FakeClient:
         self._table = name
         self._filters = {}
         self._selecting = False
+        self._updating = None
         return self
 
     def upsert(self, records: list[dict], **kwargs) -> FakeClient:
         self._pending = (records, kwargs)
+        return self
+
+    def update(self, values: dict) -> FakeClient:
+        self._updating = values
         return self
 
     def select(self, columns: str) -> FakeClient:
@@ -102,5 +108,10 @@ class FakeClient:
             matching = [r for r in self.seasons if all(r[k] == v for k, v in self._filters.items())]
             rows = [{c: r[c] for c in self._columns} for r in matching]
             return SimpleNamespace(data=rows)
+        if self._updating is not None:
+            matching = [r for r in self.seasons if all(r[k] == v for k, v in self._filters.items())]
+            for r in matching:
+                r.update(self._updating)
+            return SimpleNamespace(data=[dict(r) for r in matching])
         self.upserts.append((self._table, *self._pending))
         return None

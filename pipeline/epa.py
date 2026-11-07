@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from statistics import NormalDist
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 _NORMAL = NormalDist()
 
@@ -73,6 +73,16 @@ class SeasonMatches:
 
 
 @dataclass(frozen=True)
+class Prediction:
+
+    total: float
+    auto: float
+
+
+Observer = Callable[[Match, Prediction, Prediction], None]
+
+
+@dataclass(frozen=True)
 class Point:
 
     posted_key: str
@@ -110,6 +120,10 @@ def calculate_k_factor(n: int, kmax: float, kmin: float) -> float:
     return kmin
 
 
+def model_rating(rating: float) -> float:
+    return max(1.0, rating)
+
+
 def calculate_epa_update(
     r1: float, r2: float, b1: float, b2: float,
     r_actual: float, b_actual: float,
@@ -119,8 +133,8 @@ def calculate_epa_update(
     red_rating = r1 + r2
     blue_rating = b1 + b2
 
-    red_std = a_param * math.pow(max(1, red_rating), p_param)
-    blue_std = a_param * math.pow(max(1, blue_rating), p_param)
+    red_std = a_param * math.pow(model_rating(red_rating), p_param)
+    blue_std = a_param * math.pow(model_rating(blue_rating), p_param)
 
     margin_z = ((r_actual - b_actual) - (red_rating - blue_rating)) / math.sqrt(red_std**2 + blue_std**2)
     result_prob = _NORMAL.cdf(margin_z) - 0.5
@@ -170,13 +184,15 @@ def _competition_ranks(values: Mapping[int, float]) -> dict[int, int]:
     return {team: 1 + n - bisect_right(ascending, v) for team, v in values.items()}
 
 
-def rate_season(data: SeasonMatches, params: EpaParams) -> list[TeamRow]:
+def rate_season(data: SeasonMatches, params: EpaParams, observe: Observer | None = None) -> list[TeamRow]:
     states: defaultdict[int, _TeamState] = defaultdict(lambda: _TeamState(params))
 
     for m in order_matches(data.matches):
         r1, r2 = (states[t] for t in m.red.teams)
         b1, b2 = (states[t] for t in m.blue.teams)
         four = (r1, r2, b1, b2)
+        if observe is not None:
+            observe(m, Prediction(r1.total + r2.total, r1.auto + r2.auto), Prediction(b1.total + b2.total, b1.auto + b2.auto))
 
         total = calculate_epa_update(
             r1.total, r2.total, b1.total, b2.total,

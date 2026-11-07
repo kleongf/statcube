@@ -56,6 +56,8 @@ class WriteFailed(Exception):
 class Store(Protocol):
     def season(self, number: int) -> Season: ...
 
+    def update_season_params(self, season: int, params: EpaParams) -> None: ...
+
     def write_ratings(self, season: int, rows: Sequence[TeamRow]) -> None: ...
 
 
@@ -155,6 +157,18 @@ class SupabaseStore:
         except (TypeError, KeyError) as exc:
             raise SeasonReadFailed(number, f"malformed row ({exc!r})") from exc
 
+    def update_season_params(self, season: int, params: EpaParams) -> None:
+        values = {
+            "mean": params.total.mean, "a": params.total.a, "p": params.total.p,
+            "mean_auto": params.auto.mean, "a_auto": params.auto.a, "p_auto": params.auto.p,
+        }
+        try:
+            rows = self._client.table("seasons").update(values).eq("season", season).execute().data
+        except Exception as exc:
+            raise WriteFailed(f"seasons row {season}: {redact(str(exc), self._secret)}") from exc
+        if not rows:
+            raise UnknownSeason(season)
+
     def write_ratings(self, season: int, rows: Sequence[TeamRow]) -> None:
         ordered = sorted(rows, key=lambda r: r.team_number)
         batches = [ordered[i:i + BATCH_ROWS] for i in range(0, len(ordered), BATCH_ROWS)]
@@ -180,9 +194,15 @@ class DryRunStore:
     def __init__(self, path: Path, read: Callable[[int], Season]) -> None:
         self._path = path
         self._read = read
+        self.season_params: dict[int, EpaParams] = {}
 
     def season(self, number: int) -> Season:
         return self._read(number)
+
+    def update_season_params(self, season: int, params: EpaParams) -> None:
+        self._read(season)
+        self.season_params[season] = params
+        logger.info("dry run: would write seasons row %d: %s", season, params)
 
     def write_ratings(self, season: int, rows: Sequence[TeamRow]) -> None:
         records = [to_record(r) for r in sorted(rows, key=lambda r: r.team_number)]
