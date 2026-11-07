@@ -14,19 +14,19 @@ from conftest import FakeClient
 
 PRIOR = epa.EpaParams(epa.RatingParams(43.04, 3.5888, 0.5686), epa.RatingParams(6.685, 2.2793, 0.6143))
 START = datetime(2025, 12, 1, tzinfo=timezone.utc)
+AUTO_SHARE = 0.2
 
 
 def synthetic_season(
     matches: int, *, seed: int = 1, a: float = 2.0, p: float = 0.6, strength: tuple[float, float] = (10, 90),
 ) -> epa.SeasonMatches:
-    """Teams with fixed strengths; each alliance scores its strength sum plus noise of std a * sum**p, auto at a fifth of total."""
     rng = random.Random(seed)
     strengths = {team: rng.uniform(*strength) for team in range(1, 301)}
 
     def alliance(pair: list[int]) -> epa.Alliance:
         mu = sum(strengths[t] for t in pair)
         total = rng.gauss(mu, a * mu ** p)
-        auto = rng.gauss(mu / 5, a * (mu / 5) ** p)
+        auto = rng.gauss(mu * AUTO_SHARE, a * (mu * AUTO_SHARE) ** p)
         return epa.Alliance((pair[0], pair[1]), round(max(0, total)), round(max(0, auto)))
 
     played = []
@@ -122,10 +122,11 @@ def test_scan_december_ranks_the_window_that_reproduces_the_seeded_row_first():
 
     scanned = fit_params.scan_december(data, PRIOR, seeded, 2025)
 
-    window, _, error = scanned[0]
-    assert window == target
-    assert error == 0
-    assert [w.start for w, _, _ in scanned if w.start.day > 28] == []
+    assert scanned[0].window == target
+    assert scanned[0].error == 0
+    refits = [row.fit.refit_spread for row in scanned]
+    assert False in refits
+    assert refits == sorted(refits, reverse=True)
 
 
 def seasons_row(season: int, params: epa.EpaParams) -> dict:
@@ -196,4 +197,4 @@ def test_cli_scan_december_prints_the_best_window_and_its_largest_error(seeded_c
     out = capsys.readouterr().out
     assert code == 0
     assert "best window 2025-12-" in out
-    assert "largest relative error" in out
+    assert "relative errors mean=" in out

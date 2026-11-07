@@ -155,8 +155,7 @@ class SupabaseStore:
         except (TypeError, KeyError) as exc:
             raise SeasonReadFailed(number, f"malformed row ({exc!r})") from exc
 
-    def write_season_params(self, season: int, params: EpaParams) -> None:
-        """Update the six EPA columns of an existing row. PR-5's migration, not the fitter, creates a season's row."""
+    def update_season_params(self, season: int, params: EpaParams) -> None:
         values = {
             "mean": params.total.mean, "a": params.total.a, "p": params.total.p,
             "mean_auto": params.auto.mean, "a_auto": params.auto.a, "p_auto": params.auto.p,

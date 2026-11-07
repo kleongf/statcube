@@ -121,6 +121,10 @@ def calculate_k_factor(n: int, kmax: float, kmin: float) -> float:
     return kmin
 
 
+def model_rating(rating: float) -> float:
+    return max(1.0, rating)
+
+
 def calculate_epa_update(
     r1: float, r2: float, b1: float, b2: float,
     r_actual: float, b_actual: float,
@@ -130,8 +134,8 @@ def calculate_epa_update(
     red_rating = r1 + r2
     blue_rating = b1 + b2
 
-    red_std = a_param * math.pow(max(1, red_rating), p_param)
-    blue_std = a_param * math.pow(max(1, blue_rating), p_param)
+    red_std = a_param * math.pow(model_rating(red_rating), p_param)
+    blue_std = a_param * math.pow(model_rating(blue_rating), p_param)
 
     margin_z = ((r_actual - b_actual) - (red_rating - blue_rating)) / math.sqrt(red_std**2 + blue_std**2)
     result_prob = _NORMAL.cdf(margin_z) - 0.5
