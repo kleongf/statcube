@@ -13,7 +13,7 @@ SEASON = epa.Season(2025, epa.EpaParams(epa.RatingParams(50, 2, 0.6), epa.Rating
 
 def wire_match(red=(1, 2), blue=(3, 4), scores=((100, 20), (80, 10)), *, played=True, at="2025-12-01T10:00:00.000Z"):
     teams = [
-        {"teamNumber": n, "onField": True, "alliance": colour, "team": {"name": f"Name {n}"}}
+        {"teamNumber": n, "onField": True, "noShow": False, "alliance": colour, "team": {"name": f"Name {n}"}}
         for colour, side in (("Red", red), ("Blue", blue))
         for n in side
     ]
@@ -86,10 +86,16 @@ def test_parse_event_ignores_teams_that_are_not_on_the_field():
     assert 9 not in names
 
 
-def test_parse_event_rates_a_match_where_no_team_is_marked_on_the_field():
-    unmarked = wire_match()
-    for t in unmarked["teams"]:
+def unmarked_match(no_shows=()):
+    match = wire_match()
+    for t in match["teams"]:
         t["onField"] = False
+        t["noShow"] = t["teamNumber"] in no_shows
+    return match
+
+
+def test_parse_event_rates_a_match_where_no_team_is_marked_on_the_field():
+    unmarked = unmarked_match()
 
     matches, names, skipped = ftcscout.parse_event("EV", [unmarked])
 
@@ -97,6 +103,18 @@ def test_parse_event_rates_a_match_where_no_team_is_marked_on_the_field():
     assert matches[0].red == epa.Alliance((1, 2), 100, 20)
     assert matches[0].blue == epa.Alliance((3, 4), 80, 10)
     assert names == {1: "Name 1", 2: "Name 2", 3: "Name 3", 4: "Name 4"}
+
+
+def test_parse_event_skips_an_unmarked_match_where_every_team_was_a_no_show():
+    matches, names, skipped = ftcscout.parse_event("EV", [unmarked_match(no_shows={1, 2, 3, 4})])
+
+    assert (matches, names, skipped) == ([], {}, 1)
+
+
+def test_parse_event_skips_an_unmarked_match_where_one_team_was_a_no_show():
+    matches, names, skipped = ftcscout.parse_event("EV", [unmarked_match(no_shows={3})])
+
+    assert (matches, names, skipped) == ([], {}, 1)
 
 
 def test_parse_event_skips_a_match_where_only_some_teams_are_on_the_field():

@@ -71,6 +71,7 @@ query GetEventMatches($eventByCodeSeason: Int!, $eventByCodeCode: String!) {{
       teams {{
         teamNumber
         onField
+        noShow
         alliance
         team {{
           name
@@ -99,8 +100,8 @@ def parse_event(event_code: str, raw_matches: list[Mapping[str, Any]]) -> tuple[
         if not (raw.get("hasBeenPlayed") and raw.get("postResultTime")):
             continue
         raw_teams = raw.get("teams") or []
-        # Some events (2026 KZASN1) mark every team onField=false; then the listed teams played.
-        fielded = [t for t in raw_teams if t.get("onField")] or raw_teams
+        # Some events (2026 KZASN1) mark every team onField=false; then the listed teams that showed up played.
+        fielded = [t for t in raw_teams if t.get("onField")] or [t for t in raw_teams if not t.get("noShow")]
         scores = raw.get("scores")
         red = _alliance(fielded, "Red", scores)
         blue = _alliance(fielded, "Blue", scores)
