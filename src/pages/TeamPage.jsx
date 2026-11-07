@@ -382,7 +382,7 @@ export default function TeamPage() {
         .from(`epa_${season}`)
         .select('*')
         .eq('team_number', teamNumber)
-        .single()
+        .maybeSingle()
       if (error) setError(error.message)
       else setTeam(data)
       setLoading(false)
@@ -474,23 +474,29 @@ export default function TeamPage() {
           </div>
         )}
 
-        {!loading && team && (
+        {!loading && !error && (
           <>
             {/* Header */}
             <div className="mb-8">
               <div className="flex items-baseline gap-3 mb-1">
-                <h1 className="text-3xl font-bold text-white">{team.team_number}</h1>
-                <span className="text-xl text-gray-400">{team.team_name}</span>
+                <h1 className="text-3xl font-bold text-white">{teamNum}</h1>
+                <span className="text-xl text-gray-400">{team?.team_name}</span>
               </div>
-              <div className="grid grid-cols-3 gap-4 mt-5">
-                <StatCard label="Total EPA" value={team.current_epa} color="text-blue-400" rank={ranks?.epa} totalTeams={totalTeams} />
-                <StatCard label="Auto EPA" value={team.current_auto_epa} color="text-emerald-400" rank={ranks?.auto} totalTeams={totalTeams} />
-                <StatCard label="Teleop EPA" value={team.current_teleop_epa} color="text-violet-400" rank={ranks?.teleop} totalTeams={totalTeams} />
-              </div>
+              {team && (
+                <div className="grid grid-cols-3 gap-4 mt-5">
+                  <StatCard label="Total EPA" value={team.current_epa} color="text-blue-400" rank={ranks?.epa} totalTeams={totalTeams} />
+                  <StatCard label="Auto EPA" value={team.current_auto_epa} color="text-emerald-400" rank={ranks?.auto} totalTeams={totalTeams} />
+                  <StatCard label="Teleop EPA" value={team.current_teleop_epa} color="text-violet-400" rank={ranks?.teleop} totalTeams={totalTeams} />
+                </div>
+              )}
             </div>
 
             {/* EPA Chart */}
-            {chartData.length > 0 ? (
+            {!team ? (
+              <div className="bg-gray-900 rounded-xl border border-gray-800 p-10 text-center text-gray-500 mb-8">
+                Not rated yet this season.
+              </div>
+            ) : chartData.length > 0 ? (
               <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 mb-8">
                 <h2 className="text-lg font-semibold text-white mb-5">EPA Over Time</h2>
                 <ResponsiveContainer width="100%" height={380}>
