@@ -9,10 +9,10 @@ import pytest
 
 import epa
 import ftcscout
-from store import builtin_season
+from conftest import SEASON_2025
 
 FIXTURES = Path(__file__).parent / "fixtures"
-PARAMS = builtin_season(2025).params
+PARAMS = SEASON_2025.params
 
 
 def season_matches(raw_events) -> epa.SeasonMatches:

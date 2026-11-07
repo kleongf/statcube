@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+import traceback
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Callable, Mapping, Sequence
 
 import epa
 import ftcscout
-from store import DryRunStore, InvalidEnv, MissingEnv, Store, SupabaseStore, UnknownSeason, WriteFailed, redact
+from store import DryRunStore, InvalidEnv, MissingEnv, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed, redact
 
 Fetch = Callable[[epa.Season], epa.SeasonMatches]
 
@@ -48,7 +49,7 @@ def _parser() -> argparse.ArgumentParser:
         nargs="?",
         const="",
         metavar="PATH",
-        help="write the rows to PATH (default epa_<season>.dry.json) instead of Supabase",
+        help="read the season parameters from Supabase, but write the rows to PATH (default epa_<season>.dry.json) instead",
     )
     return parser
 
@@ -60,7 +61,7 @@ def main(
     fetch: Fetch | None = None,
     store: Store | None = None,
 ) -> int:
-    """0 on success. 1 on FetchFailed or a failed write. 2 on usage, MissingEnv, InvalidEnv, or UnknownSeason."""
+    """0 on success. 1 on FetchFailed, a failed read or write, or any other error. 2 on usage, MissingEnv, InvalidEnv, or UnknownSeason."""
     args = _parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
     logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -74,7 +75,7 @@ def main(
             if args.dry_run is None:
                 store = SupabaseStore.from_env(env)
             else:
-                store = DryRunStore(Path(args.dry_run or f"epa_{args.season}.dry.json"))
+                store = DryRunStore(Path(args.dry_run or f"epa_{args.season}.dry.json"), SupabaseStore.from_env(env).season)
         if fetch is None:
             fetch = partial(ftcscout.fetch_season, post=ftcscout.http_post(env.get("FTCSCOUT_GRAPHQL_URL", ftcscout.DEFAULT_URL)))
         summary = refresh_season(args.season, store, fetch=fetch)
@@ -86,8 +87,11 @@ def main(
         for code, message in sorted(exc.failures.items()):
             fail(f"  {code}: {message}")
         return 1
-    except WriteFailed as exc:
+    except (SeasonReadFailed, WriteFailed) as exc:
         fail(f"error: {exc}")
+        return 1
+    except Exception:
+        fail(traceback.format_exc().rstrip())
         return 1
     print(summary)
     return 0

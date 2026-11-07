@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import SeasonSelect from '../components/SeasonSelect'
-import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
+import { CURRENT_SEASON } from '../lib/constants'
+import { useSeason } from '../lib/useSeason'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -256,7 +257,8 @@ function ScoreCell({ scores, teamAlliance }) {
   )
 }
 
-function PredCell({ winProb, redPred, bluePred, teamAlliance }) {
+function PredCell({ seasonStatus, winProb, redPred, bluePred, teamAlliance }) {
+  if (seasonStatus === 'loading') return <span className="text-gray-700 text-sm animate-pulse">…</span>
   if (winProb == null) return <span className="text-gray-600 text-sm">—</span>
   const redPct = Math.round(winProb * 100)
   const bluePct = 100 - redPct
@@ -286,7 +288,7 @@ function PredCell({ winProb, redPred, bluePred, teamAlliance }) {
   )
 }
 
-function EventMatchTable({ eventCode, matches, teamNumber, teamEpas, params }) {
+function EventMatchTable({ eventCode, matches, teamNumber, teamEpas, seasonState }) {
   return (
     <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 flex items-center gap-3">
@@ -306,12 +308,9 @@ function EventMatchTable({ eventCode, matches, teamNumber, teamEpas, params }) {
         </thead>
         <tbody>
           {matches.map((m, i) => {
-            const preds = getMatchPredictions(
-              m.match.teams,
-              m.match.postResultTime,
-              teamEpas,
-              params,
-            )
+            const preds = seasonState.params
+              ? getMatchPredictions(m.match.teams, m.match.postResultTime, teamEpas, seasonState.params)
+              : null
             return (
               <tr
                 key={i}
@@ -340,6 +339,7 @@ function EventMatchTable({ eventCode, matches, teamNumber, teamEpas, params }) {
                 </td>
                 <td className="px-5 py-3">
                   <PredCell
+                    seasonStatus={seasonState.status}
                     winProb={preds?.winProb ?? null}
                     redPred={preds?.redPred ?? null}
                     bluePred={preds?.bluePred ?? null}
@@ -362,6 +362,7 @@ export default function TeamPage() {
   const season = parseInt(seasonParam ?? String(CURRENT_SEASON), 10)
   const navigate = useNavigate()
   const teamNum = parseInt(teamNumber, 10)
+  const seasonState = useSeason(season)
 
   const [team, setTeam] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -565,6 +566,11 @@ export default function TeamPage() {
 
               {!matchesLoading && matchEvents.length > 0 && (
                 <div className="flex flex-col gap-5">
+                  {seasonState.error && (
+                    <p className="text-amber-400 text-xs">
+                      {seasonState.error}. Predictions are unavailable.
+                    </p>
+                  )}
                   {matchEvents.map(([eventCode, matches]) => (
                     <EventMatchTable
                       key={eventCode}
@@ -572,7 +578,7 @@ export default function TeamPage() {
                       matches={matches}
                       teamNumber={teamNum}
                       teamEpas={teamEpas}
-                      params={SEASON_PARAMS[season] ?? SEASON_PARAMS[2025]}
+                      seasonState={seasonState}
                     />
                   ))}
                 </div>

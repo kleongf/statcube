@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 import httpx
-from supabase import ClientOptions, create_client
+from postgrest.exceptions import APIError
+from supabase import ClientOptions, SupabaseException, create_client
 
 from epa import EpaParams, RatingParams, Season, TeamRow
 
@@ -20,12 +21,8 @@ ATTEMPTS = 3
 REQUEST_TIMEOUT_S = 120
 PRINTABLE_ASCII = re.compile(r"[!-~]+")
 
-BUILTIN_SEASONS: Mapping[int, EpaParams] = {
-    2025: EpaParams(RatingParams(113.30 / 2, 2.1482, 0.6543), RatingParams(25.33 / 2, 2.4555, 0.5535)),
-    2024: EpaParams(RatingParams(86.08 / 2, 3.5888, 0.5686), RatingParams(13.37 / 2, 2.2793, 0.6143)),
-    2023: EpaParams(RatingParams(72.08 / 2, 3.4415, 0.5729), RatingParams(21.38 / 2, 4.1423, 0.4741)),
-    2022: EpaParams(RatingParams(60.25 / 2, 5.0015, 0.4623), RatingParams(19.70 / 2, 5.0384, 0.3443)),
-}
+IDEMPOTENT_READS = ("GET", "HEAD")
+SEASON_COLUMNS = "season, mean, a, p, mean_auto, a_auto, p_auto"
 
 
 class MissingEnv(Exception):
@@ -39,12 +36,17 @@ class InvalidEnv(Exception):
 
 
 class ServerError(Exception):
-    """A 5xx reply. Raised from the HTTP layer because postgrest-py drops the status when the body is JSON."""
+    """A 5xx reply to a write. Raised from the HTTP layer because postgrest-py drops the status when the body is JSON."""
 
 
 class UnknownSeason(Exception):
     def __init__(self, season: int) -> None:
         super().__init__(f"season {season} has no parameters")
+
+
+class SeasonReadFailed(Exception):
+    def __init__(self, season: int, cause: Exception | str) -> None:
+        super().__init__(f"could not read season {season} from the seasons table: {cause}")
 
 
 class WriteFailed(Exception):
@@ -57,11 +59,14 @@ class Store(Protocol):
     def write_ratings(self, season: int, rows: Sequence[TeamRow]) -> None: ...
 
 
-def builtin_season(number: int) -> Season:
-    params = BUILTIN_SEASONS.get(number)
-    if params is None:
-        raise UnknownSeason(number)
-    return Season(number, params)
+def season_from_row(row: Mapping[str, Any]) -> Season:
+    return Season(
+        row["season"],
+        EpaParams(
+            RatingParams(row["mean"], row["a"], row["p"]),
+            RatingParams(row["mean_auto"], row["a_auto"], row["p_auto"]),
+        ),
+    )
 
 
 def to_record(row: TeamRow) -> dict[str, Any]:
@@ -89,19 +94,21 @@ def _parse_env(env: Mapping[str, str]) -> tuple[str, str]:
     missing = [name for name in REQUIRED_ENV if not env.get(name)]
     if missing:
         raise MissingEnv(missing)
-    for name in REQUIRED_ENV:
-        if not PRINTABLE_ASCII.fullmatch(env[name]):
-            raise InvalidEnv(
-                f"{name} has spaces, line breaks, or non-ASCII characters. "
-                "Copy it again exactly; for the key, `supabase projects api-keys --reveal` prints it unmasked."
-            )
-    if not env["SUPABASE_URL"].startswith(("http://", "https://")):
+    if not PRINTABLE_ASCII.fullmatch(env["SUPABASE_URL"]):
+        raise InvalidEnv("SUPABASE_URL has spaces, line breaks, or non-ASCII characters. Copy it again exactly.")
+    if not PRINTABLE_ASCII.fullmatch(env["SUPABASE_SECRET_KEY"]):
+        raise InvalidEnv(
+            "SUPABASE_SECRET_KEY has spaces, line breaks, or non-ASCII characters. "
+            "Copy it again exactly; `supabase projects api-keys --reveal` prints it unmasked."
+        )
+    scheme, separator, rest = env["SUPABASE_URL"].partition("://")
+    if not separator or scheme.lower() not in ("http", "https"):
         raise InvalidEnv("SUPABASE_URL must start with http:// or https://")
-    return env["SUPABASE_URL"], env["SUPABASE_SECRET_KEY"]
+    return f"{scheme.lower()}://{rest}", env["SUPABASE_SECRET_KEY"]
 
 
 def _raise_server_error(response: httpx.Response) -> None:
-    if response.is_server_error:
+    if response.is_server_error and response.request.method not in IDEMPOTENT_READS:
         response.read()
         raise ServerError(f"HTTP {response.status_code}: {response.text}")
 
@@ -128,11 +135,25 @@ class SupabaseStore:
         http_client = httpx.Client(
             http2=False, timeout=REQUEST_TIMEOUT_S, transport=transport, event_hooks={"response": [_raise_server_error]},
         )
-        client = create_client(url, secret, options=ClientOptions(httpx_client=http_client))
+        try:
+            client = create_client(url, secret, options=ClientOptions(httpx_client=http_client))
+        except (ValueError, SupabaseException) as exc:
+            raise InvalidEnv(f"SUPABASE_URL is not a valid URL: {exc}") from exc
         return cls(client, secret=secret, sleep=sleep)
 
     def season(self, number: int) -> Season:
-        return builtin_season(number)
+        try:
+            rows = self._client.table("seasons").select(SEASON_COLUMNS).eq("season", number).execute().data
+        except (APIError, httpx.HTTPError) as exc:
+            raise SeasonReadFailed(number, exc) from exc
+        if not isinstance(rows, list):
+            raise SeasonReadFailed(number, f"expected a JSON array, got {type(rows).__name__}")
+        if not rows:
+            raise UnknownSeason(number)
+        try:
+            return season_from_row(rows[0])
+        except (TypeError, KeyError) as exc:
+            raise SeasonReadFailed(number, f"malformed row ({exc!r})") from exc
 
     def write_ratings(self, season: int, rows: Sequence[TeamRow]) -> None:
         ordered = sorted(rows, key=lambda r: r.team_number)
@@ -156,7 +177,7 @@ class SupabaseStore:
 
 class DryRunStore:
 
-    def __init__(self, path: Path, read: Callable[[int], Season] = builtin_season) -> None:
+    def __init__(self, path: Path, read: Callable[[int], Season]) -> None:
         self._path = path
         self._read = read
 

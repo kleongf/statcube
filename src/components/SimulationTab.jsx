@@ -138,7 +138,8 @@ function leaderSummary(result, names) {
   return `${result.runs.toLocaleString()} simulations. Team ${leader.teamNumber}${name ? ` ${name}` : ''} finishes first most often, in ${share}% of runs.`
 }
 
-export default function SimulationTab({ event, season, ratings, params, settings, onSettingsChange }) {
+export default function SimulationTab({ event, season, ratings, seasonState, settings, onSettingsChange }) {
+  const { params } = seasonState
   const rules = rankingRulesFor(season)
   const { runs, seed } = settings
   const [topNText, setTopNText] = useState(String(settings.topN))
@@ -150,7 +151,7 @@ export default function SimulationTab({ event, season, ratings, params, settings
   const upcoming = useMemo(() => upcomingMatches(event), [event])
   const result = useMemo(
     () =>
-      ratings && upcoming.length > 0 && standings.length > 0
+      ratings && params && upcoming.length > 0 && standings.length > 0
         ? runSimulations({ standings, upcoming, ratings, params, rules, runs, rng: mulberry32(seed) })
         : null,
     [rules, standings, upcoming, ratings, params, runs, seed],
@@ -205,7 +206,8 @@ export default function SimulationTab({ event, season, ratings, params, settings
         </>
       )}
 
-      {upcoming.length > 0 && !ratings && <Notice>Loading EPA ratings…</Notice>}
+      {upcoming.length > 0 && seasonState.error && <Notice>{seasonState.error}. The simulation is unavailable.</Notice>}
+      {upcoming.length > 0 && !seasonState.error && !(ratings && params) && <Notice>Loading EPA ratings…</Notice>}
 
       {result && (
         <>

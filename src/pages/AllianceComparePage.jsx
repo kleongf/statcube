@@ -6,7 +6,8 @@ import SeasonSelect from '../components/SeasonSelect'
 import TeamSearchBox from '../components/TeamSearchBox'
 import LoadError from '../components/LoadError'
 import { ALLIANCE_SIZE, dropUnknownTeams, parseAlliances, paramsMatch, withTeamParams } from '../lib/teamParams'
-import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
+import { CURRENT_SEASON } from '../lib/constants'
+import { useSeason } from '../lib/useSeason'
 
 function erf(x) {
   const sign = x < 0 ? -1 : 1
@@ -148,7 +149,7 @@ export default function AllianceComparePage() {
 }
 
 function AllianceView({ season }) {
-  const params = SEASON_PARAMS[season] ?? SEASON_PARAMS[CURRENT_SEASON]
+  const { params, error: seasonError } = useSeason(season)
   const [searchParams, setSearchParams] = useSearchParams()
 
   const requested = useMemo(
@@ -202,7 +203,7 @@ function AllianceView({ season }) {
     redTeams.length > 0 && blueTeams.length > 0 &&
     [...redTeams, ...blueTeams].every((t) => t.loaded)
 
-  const winProb = showWinProb
+  const winProb = showWinProb && params
     ? calcRedWinProb(redEpas[0], redEpas[1] ?? null, blueEpas[0], blueEpas[1] ?? null, params)
     : null
 
@@ -217,6 +218,12 @@ function AllianceView({ season }) {
         <p className="text-gray-400 mb-6 text-sm">
           {season}/{season + 1} season · Build two alliances and compare their expected performance
         </p>
+
+        {seasonError && (
+          <div className="bg-red-900/40 border border-red-700 rounded-lg p-4 text-red-300 mb-4 text-sm">
+            {seasonError}
+          </div>
+        )}
 
         <div className="flex gap-4 mb-6">
           <TeamPicker

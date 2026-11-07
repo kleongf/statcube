@@ -1,39 +1,20 @@
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 import pytest
+from postgrest.exceptions import APIError
 
 import epa
 import store
+from conftest import SEASON_2025, FakeClient, read_seasons
 
 
 def team_row(number: int) -> epa.TeamRow:
     history = (epa.Point("2025-12-01T10:00:00.000Z", 40.5, 10.25, 30.25), epa.Point("2025-12-01T11:00:00.000Z", 44.0, 11.0, 33.0))
     return epa.TeamRow(number, f"Team {number}", history, epa.Ranks(7, 8, 9))
-
-
-class FakeClient:
-
-    def __init__(self, errors: list[Exception] | None = None) -> None:
-        self.errors = list(errors or [])
-        self.upserts: list[tuple[str, list[dict], dict]] = []
-        self._table = ""
-        self._pending: tuple[list[dict], dict] = ([], {})
-
-    def table(self, name: str) -> FakeClient:
-        self._table = name
-        return self
-
-    def upsert(self, records: list[dict], **kwargs) -> FakeClient:
-        self._pending = (records, kwargs)
-        return self
-
-    def execute(self) -> None:
-        if self.errors:
-            raise self.errors.pop(0)
-        self.upserts.append((self._table, *self._pending))
 
 
 def make_store(client: FakeClient) -> tuple[store.SupabaseStore, list[float]]:
@@ -59,10 +40,42 @@ def test_record_carries_history_maps_current_values_and_ranks():
     }
 
 
-def test_builtin_seasons_cover_2022_to_2025_and_nothing_else():
-    assert [builtin for builtin in range(2021, 2028) if builtin in store.BUILTIN_SEASONS] == [2022, 2023, 2024, 2025]
+def test_season_reads_the_seasons_row_into_total_and_auto_params():
+    row = {"season": 2024, "mean": 43.04, "a": 3.5888, "p": 0.5686, "mean_auto": 6.685, "a_auto": 2.2793, "p_auto": 0.6143}
+    client = FakeClient(seasons=[row])
+    sut, _ = make_store(client)
+
+    spec = sut.season(2024)
+
+    assert spec == epa.Season(2024, epa.EpaParams(epa.RatingParams(43.04, 3.5888, 0.5686), epa.RatingParams(6.685, 2.2793, 0.6143)))
+    assert client.selects == [("seasons", {"season": 2024})]
+
+
+def test_season_without_a_row_raises_unknown_season_naming_it():
+    sut, _ = make_store(FakeClient(seasons=[]))
+
     with pytest.raises(store.UnknownSeason, match="2026"):
-        store.builtin_season(2026)
+        sut.season(2026)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        APIError({"message": "Invalid API key", "code": "PGRST301"}),
+        APIError({"message": "Could not find the table 'public.seasons' in the schema cache", "code": "PGRST205"}),
+        APIError({"message": "permission denied for table seasons", "code": "42501"}),
+        APIError({"message": "Service Unavailable", "code": "503"}),
+        httpx.ConnectError("Connection refused"),
+    ],
+    ids=["bad-key", "no-table", "denied", "unavailable", "refused"],
+)
+def test_season_wraps_a_read_failure_in_season_read_failed_naming_the_season_and_cause(failure):
+    sut, _ = make_store(FakeClient([failure]))
+
+    with pytest.raises(store.SeasonReadFailed, match="season 2025") as raised:
+        sut.season(2025)
+
+    assert str(failure) in str(raised.value)
 
 
 def test_write_ratings_upserts_in_batches_of_500_in_team_order():
@@ -196,10 +209,107 @@ def test_from_env_builds_a_store_without_touching_the_network(no_network):
 
 def test_dry_run_store_writes_the_records_the_upsert_would_send(tmp_path):
     path = tmp_path / "rows.json"
-    sut = store.DryRunStore(path)
+    sut = store.DryRunStore(path, read_seasons)
 
     sut.write_ratings(2025, [team_row(2), team_row(1)])
 
     written = json.loads(path.read_text())
     assert [r["team_number"] for r in written] == [1, 2]
     assert written[0] == store.to_record(team_row(1))
+
+
+def test_dry_run_store_serves_seasons_from_its_reader(tmp_path):
+    sut = store.DryRunStore(tmp_path / "rows.json", read_seasons)
+
+    assert sut.season(2025) == SEASON_2025
+    with pytest.raises(store.UnknownSeason, match="2019"):
+        sut.season(2019)
+
+
+SEASON_ROW = {"season": 2025, "mean": 56.65, "a": 2.1482, "p": 0.6543, "mean_auto": 12.665, "a_auto": 2.4555, "p_auto": 0.5535}
+
+
+def replies(*responses: httpx.Response) -> tuple[httpx.MockTransport, list[httpx.Request]]:
+    seen: list[httpx.Request] = []
+    queue = list(responses)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    return httpx.MockTransport(handle), seen
+
+
+class UnreadStream(httpx.SyncByteStream):
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def __iter__(self):
+        yield self.body
+
+
+@pytest.fixture
+def postgrest_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    return sleeps
+
+
+def test_season_recovers_from_a_transient_503_through_the_shared_client(postgrest_sleeps):
+    transport, seen = replies(
+        httpx.Response(503, json={"code": "PGRST002", "message": "schema cache"}),
+        httpx.Response(200, json=[SEASON_ROW]),
+    )
+    sut, _ = real_store(transport)
+
+    assert sut.season(2025).number == 2025
+    assert len(seen) == 2
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        httpx.Response(503, json={"code": "PGRST002", "message": "schema cache"}),
+        httpx.Response(500, json={"code": "57014", "message": "statement timeout"}),
+        httpx.Response(401, json={"code": "PGRST301", "message": "JWT expired"}),
+        httpx.Response(200, text="<html>captive portal</html>", headers={"content-type": HTML}),
+        httpx.Response(200, text="null", headers={"content-type": JSON}),
+        httpx.Response(200, json=[{"season": 2025}]),
+        httpx.Response(200, stream=UnreadStream(b"not gzip"), headers={"content-type": JSON, "content-encoding": "gzip"}),
+    ],
+    ids=["503-always", "500-json", "401", "html-200", "null-200", "row-missing-columns", "bad-gzip"],
+)
+def test_season_turns_any_bad_reply_through_the_shared_client_into_season_read_failed(reply, postgrest_sleeps):
+    transport, _ = replies(reply)
+    sut, _ = real_store(transport)
+
+    with pytest.raises(store.SeasonReadFailed, match="season 2025"):
+        sut.season(2025)
+
+
+def test_write_ratings_retries_a_5xx_whose_body_arrives_as_a_stream():
+    transport, seen = replies(
+        httpx.Response(503, stream=UnreadStream(b'{"code":"PGRST002","message":"schema cache"}'), headers={"content-type": JSON}),
+        httpx.Response(201, json=[]),
+    )
+    sut, sleeps = real_store(transport)
+
+    sut.write_ratings(2025, [team_row(1)])
+
+    assert len(seen) == 2
+    assert sleeps == [1]
+
+
+@pytest.mark.parametrize("url", ["https://x.supabase.co:99999", "http://127.0.0.1:abc/ok", "http://[::1/ok", "https://", "http:///x"])
+def test_from_env_rejects_a_url_that_cannot_be_parsed_as_invalid_env(url, no_network):
+    with pytest.raises(store.InvalidEnv, match="SUPABASE_URL"):
+        store.SupabaseStore.from_env({**ENV, "SUPABASE_URL": url})
+
+    assert no_network == []
+
+
+def test_from_env_accepts_the_scheme_in_any_case(no_network):
+    sut = store.SupabaseStore.from_env({**ENV, "SUPABASE_URL": "HTTPS://example.supabase.co"})
+
+    assert isinstance(sut, store.SupabaseStore)
+    assert no_network == []

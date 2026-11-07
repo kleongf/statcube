@@ -3,7 +3,8 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { ftcscoutQuery } from '../lib/ftcscout'
 import { supabase } from '../lib/supabase'
-import { CURRENT_SEASON, SEASON_PARAMS } from '../lib/constants'
+import { CURRENT_SEASON } from '../lib/constants'
+import { useSeason } from '../lib/useSeason'
 import SortableTeamsTable from '../components/SortableTeamsTable'
 import SimulationTab from '../components/SimulationTab'
 import { getEventQuery } from '../lib/eventQuery'
@@ -130,7 +131,8 @@ function ScoreCell({ scores }) {
   )
 }
 
-function PredCell({ winProb, redPred, bluePred }) {
+function PredCell({ seasonStatus, winProb, redPred, bluePred }) {
+  if (seasonStatus === 'loading') return <span className="text-gray-700 text-sm animate-pulse">…</span>
   if (winProb == null) return <span className="text-gray-600 text-sm">—</span>
   const redPct = Math.round(winProb * 100)
   const bluePct = 100 - redPct
@@ -185,7 +187,7 @@ function TeamsTab({ teams, supabaseData, season }) {
   )
 }
 
-function MatchesTab({ matches, epaLookups, params }) {
+function MatchesTab({ matches, epaLookups, seasonState }) {
   const sorted = [...matches].sort(
     (a, b) => new Date(a.scheduledStartTime) - new Date(b.scheduledStartTime),
   )
@@ -205,7 +207,9 @@ function MatchesTab({ matches, epaLookups, params }) {
         </thead>
         <tbody>
           {sorted.map((m, i) => {
-            const preds = getMatchPredictions(m.teams, m.postResultTime, epaLookups, params)
+            const preds = seasonState.params
+              ? getMatchPredictions(m.teams, m.postResultTime, epaLookups, seasonState.params)
+              : null
             return (
               <tr
                 key={i}
@@ -226,6 +230,7 @@ function MatchesTab({ matches, epaLookups, params }) {
                 </td>
                 <td className="px-5 py-3">
                   <PredCell
+                    seasonStatus={seasonState.status}
                     winProb={preds?.winProb ?? null}
                     redPred={preds?.redPred ?? null}
                     bluePred={preds?.bluePred ?? null}
@@ -362,6 +367,7 @@ export default function EventPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const eventName = location.state?.name
+  const seasonState = useSeason(season)
 
   const [event, setEvent] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -375,7 +381,6 @@ export default function EventPage() {
   const [activeTab, setActiveTab] = useState('teams')
   const [simSettings, setSimSettings] = useState({ runs: 1000, topN: 4, seed: 1 })
 
-  const params = SEASON_PARAMS[season] ?? SEASON_PARAMS[2025]
   const ratings = useMemo(() => {
     if (!ratingsLoaded) return null
     const latest = new Map()
@@ -510,7 +515,14 @@ export default function EventPage() {
             )}
 
             {activeTab === 'matches' && (
-              <MatchesTab matches={event.matches} epaLookups={epaLookups} params={params} />
+              <>
+                {seasonState.error && (
+                  <p className="text-amber-400 text-xs mb-3">
+                    {seasonState.error}. Predictions are unavailable.
+                  </p>
+                )}
+                <MatchesTab matches={event.matches} epaLookups={epaLookups} seasonState={seasonState} />
+              </>
             )}
 
             {activeTab === 'rankings' && (
@@ -522,7 +534,7 @@ export default function EventPage() {
                 event={event}
                 season={season}
                 ratings={ratings}
-                params={params}
+                seasonState={seasonState}
                 settings={simSettings}
                 onSettingsChange={setSimSettings}
               />

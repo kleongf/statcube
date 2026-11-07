@@ -4,13 +4,15 @@ import json
 from functools import partial
 from typing import Sequence
 
+import httpx
 import pytest
+from postgrest.exceptions import APIError
 
 import epa
 import ftcscout
 import refresh
 import store
-from conftest import FakePost
+from conftest import FakeClient, FakePost, read_seasons
 
 
 class RecordingStore:
@@ -18,7 +20,7 @@ class RecordingStore:
         self.writes: list[tuple[int, Sequence[epa.TeamRow]]] = []
 
     def season(self, number: int) -> epa.Season:
-        return store.builtin_season(number)
+        return read_seasons(number)
 
     def write_ratings(self, season: int, rows: Sequence[epa.TeamRow]) -> None:
         self.writes.append((season, rows))
@@ -82,6 +84,9 @@ URL = "https://example.supabase.co"
         ("SUPABASE_SECRET_KEY", URL, " " + KEY),
         ("SUPABASE_URL", "example.supabase.co", KEY),
         ("SUPABASE_URL", URL + "\n", KEY),
+        ("SUPABASE_URL", "https://x.supabase.co:99999", KEY),
+        ("SUPABASE_URL", "http://127.0.0.1:abc/ok", KEY),
+        ("SUPABASE_URL", "http://[::1/ok", KEY),
     ],
 )
 def test_a_malformed_credential_exits_2_naming_it_without_echoing_the_key_or_calling_out(name, url, key, capsys, no_network):
@@ -94,24 +99,29 @@ def test_a_malformed_credential_exits_2_naming_it_without_echoing_the_key_or_cal
     assert no_network == []
 
 
-def test_a_season_without_parameters_exits_2_naming_it_and_fetches_nothing(capsys):
+def test_a_season_missing_from_the_seasons_table_exits_2_naming_it_and_fetches_nothing(capsys):
     def fetch_must_not_run(season: epa.Season) -> epa.SeasonMatches:
         raise AssertionError("fetched")
 
-    code = refresh.main(["run", "--season", "2026"], fetch=fetch_must_not_run, store=RecordingStore())
+    sink = store.SupabaseStore(FakeClient(seasons=[]))
+
+    code = refresh.main(["run", "--season", "2019"], fetch=fetch_must_not_run, store=sink)
 
     assert code == 2
-    assert "season 2026 has no parameters" in capsys.readouterr().err
+    assert "season 2019 has no parameters" in capsys.readouterr().err
 
 
-def test_a_season_without_parameters_exits_2_with_credentials_set(capsys, no_network):
-    env = {"SUPABASE_URL": "https://example.supabase.co", "SUPABASE_SECRET_KEY": "placeholder-key"}
+def test_a_failed_season_read_exits_1_with_one_error_line_and_fetches_nothing(capsys):
+    def fetch_must_not_run(season: epa.Season) -> epa.SeasonMatches:
+        raise AssertionError("fetched")
 
-    code = refresh.main(["run", "--season", "2026"], env=env)
+    denied = APIError({"message": "permission denied for table seasons", "code": "42501"})
+    sink = store.SupabaseStore(FakeClient([denied]))
 
-    assert code == 2
-    assert "season 2026 has no parameters" in capsys.readouterr().err
-    assert no_network == []
+    code = refresh.main(["run", "--season", "2025"], fetch=fetch_must_not_run, store=sink)
+
+    assert code == 1
+    assert capsys.readouterr().err.splitlines() == ["error: could not read season 2025 from the seasons table: " + str(denied)]
 
 
 def test_a_failed_write_exits_1(raw_events, capsys):
@@ -125,13 +135,60 @@ def test_a_failed_write_exits_1(raw_events, capsys):
     assert "boom" in capsys.readouterr().err
 
 
-def test_dry_run_needs_no_credentials_and_writes_the_rows_to_the_given_path(raw_events, tmp_path, capsys):
+def test_dry_run_reads_parameters_through_the_store_and_writes_the_rows_to_the_given_path(raw_events, tmp_path, capsys):
     path = tmp_path / "rows.json"
+    sink = store.DryRunStore(path, read_seasons)
 
-    code = refresh.main(["run", "--season", "2025", "--dry-run", str(path)], env={}, fetch=fetch_from(FakePost(raw_events)))
+    code = refresh.main(["run", "--season", "2025", "--dry-run", str(path)], fetch=fetch_from(FakePost(raw_events)), store=sink)
 
     assert code == 0
     assert capsys.readouterr().out.splitlines()[-1].startswith("refreshed season=2025 teams=14")
     rows = json.loads(path.read_text())
     assert len(rows) == 14
     assert {"rank_epa", "rank_auto_epa", "rank_teleop_epa", "current_epa"} <= set(rows[0])
+
+
+def test_dry_run_reads_the_parameters_from_supabase_not_from_a_constant(raw_events, tmp_path, monkeypatch):
+    params_2025 = {"season": 2025, "mean": 50.0, "a": 2.0, "p": 0.6, "mean_auto": 10.0, "a_auto": 2.0, "p_auto": 0.5}
+    client = FakeClient(seasons=[params_2025])
+    monkeypatch.setattr(store.SupabaseStore, "from_env", classmethod(lambda cls, env: cls(client)))
+    path = tmp_path / "rows.json"
+
+    code = refresh.main(["run", "--season", "2025", "--dry-run", str(path)], env={}, fetch=fetch_from(FakePost(raw_events)))
+
+    assert code == 0
+    assert client.selects == [("seasons", {"season": 2025})]
+    assert client.upserts == []
+    assert len(json.loads(path.read_text())) == 14
+
+
+def test_dry_run_needs_the_supabase_variables_because_it_reads_the_parameters(capsys, no_network):
+    code = refresh.main(["run", "--season", "2025", "--dry-run"], env={})
+
+    assert code == 2
+    assert "SUPABASE_URL, SUPABASE_SECRET_KEY" in capsys.readouterr().err
+    assert no_network == []
+
+
+def test_an_unexpected_store_error_exits_1_without_printing_the_key(capsys):
+    class LeakyStore(RecordingStore):
+        def season(self, number):
+            raise RuntimeError(f"upstream said: Authorization: Bearer {KEY}")
+
+    code = refresh.main(["run", "--season", "2025"], env={"SUPABASE_SECRET_KEY": KEY}, store=LeakyStore())
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "RuntimeError" in err
+    assert "Bearer ***" in err
+    assert KEY not in err
+
+
+def test_an_html_page_on_a_200_seasons_read_exits_1_with_one_line(capsys):
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text="<html>portal</html>", headers={"content-type": "text/html"}))
+    sink = store.SupabaseStore.from_env({"SUPABASE_URL": URL, "SUPABASE_SECRET_KEY": KEY}, transport=transport)
+
+    code = refresh.main(["run", "--season", "2025"], env={"SUPABASE_SECRET_KEY": KEY}, store=sink)
+
+    assert code == 1
+    assert capsys.readouterr().err.splitlines() == ["error: could not read season 2025 from the seasons table: expected a JSON array, got str"]
