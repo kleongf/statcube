@@ -15,7 +15,7 @@ from typing import Callable, Mapping, Sequence
 
 import epa
 import ftcscout
-from store import InvalidEnv, MissingEnv, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed, redact
+from store import InvalidEnv, MissingEnv, RunsReadFailed, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed, redact
 
 MIN_BINS = 6
 MIN_BIN_ALLIANCES = 50
@@ -264,7 +264,7 @@ def main(
         if args.if_open:
             until = store.season(args.season).refit_until
             if until is None or (today or datetime.now(timezone.utc).date()) >= until:
-                print(f"season {args.season} parameters are frozen (params_refit_until {until}); not refitting")
+                print(f"season {args.season} parameters are frozen (params_refit_until {until or 'null'}); not refitting")
                 return 0
         prior = _prior(store, args.season)
         data = fetch(epa.Season(args.season, prior.params))
@@ -274,15 +274,15 @@ def main(
         if not args.write:
             print("dry run; pass --write to update the seasons row")
             return 0
-        if reason := refusal(fit):
-            fail(f"error: refusing to write seasons row {args.season}: {reason}")
-            return 1
         if args.min_new_matches:
             last = store.last_run(args.season, "refit")
             new = fit.matches - (last.matches if last else 0)
             if new < args.min_new_matches:
                 print(f"skipped refit: {new} new matches (need {args.min_new_matches})")
                 return 0
+        if reason := refusal(fit):
+            fail(f"error: refusing to write seasons row {args.season}: {reason}")
+            return 1
         store.update_season_params(args.season, fit.params)
         store.record_run(args.season, fit.matches, data.events, "refit")
         print(f"wrote seasons row {args.season}")
@@ -294,7 +294,7 @@ def main(
         for code, message in sorted(exc.failures.items()):
             fail(f"  {code}: {message}")
         return 1
-    except (NoMatches, SeasonReadFailed, WriteFailed) as exc:
+    except (NoMatches, SeasonReadFailed, RunsReadFailed, WriteFailed) as exc:
         fail(f"error: {exc}")
         return 1
     except Exception:

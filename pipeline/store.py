@@ -52,6 +52,11 @@ class SeasonReadFailed(Exception):
         super().__init__(f"could not read season {season} from the seasons table: {cause}")
 
 
+class RunsReadFailed(Exception):
+    def __init__(self, season: int, cause: Exception | str) -> None:
+        super().__init__(f"could not read the last run of season {season} from the refresh_runs table: {cause}")
+
+
 class WriteFailed(Exception):
     pass
 
@@ -64,7 +69,8 @@ class RatedFewerMatches(Exception):
         super().__init__(
             f"refusing to write season {season}: rated {matches} matches, fewer than the {last.matches} "
             f"of the last successful run ({last.finished_at}). The upstream fetch may have dropped events. "
-            f"Delete that row from refresh_runs to accept the lower count."
+            f"To accept the lower count, run: "
+            f"delete from refresh_runs where season = {season} and kind = 'refresh' and matches > {matches};"
         )
 
 
@@ -191,9 +197,9 @@ class SupabaseStore:
                 .order("finished_at", desc=True).limit(1).execute().data
             )
         except (APIError, httpx.HTTPError) as exc:
-            raise SeasonReadFailed(season, f"refresh_runs: {exc}") from exc
+            raise RunsReadFailed(season, exc) from exc
         if not isinstance(rows, list):
-            raise SeasonReadFailed(season, f"refresh_runs: expected a JSON array, got {type(rows).__name__}")
+            raise RunsReadFailed(season, f"expected a JSON array, got {type(rows).__name__}")
         return Run(rows[0]["matches"], rows[0]["events"], rows[0]["finished_at"]) if rows else None
 
     def record_run(self, season: int, matches: int, events: int, kind: RunKind = "refresh") -> None:

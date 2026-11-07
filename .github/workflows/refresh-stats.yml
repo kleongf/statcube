@@ -2,8 +2,8 @@ name: Refresh stats
 
 on:
   schedule:
-    - cron: "0 */3 * * *"
-    - cron: "0 12 * * 1"
+    - cron: "7 */3 * * *"
+    - cron: "17 12 * * 1"
   workflow_dispatch:
     inputs:
       season:
@@ -24,18 +24,18 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-  SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-  WEEKLY_REFIT_CRON: "0 12 * * 1"
+  WEEKLY_REFIT_CRON: "17 12 * * 1"
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      PYTHONUNBUFFERED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
@@ -44,6 +44,10 @@ jobs:
       - run: pip install -r pipeline/requirements.txt
 
       - name: Check secrets
+        id: secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
           for name in SUPABASE_URL SUPABASE_SECRET_KEY; do
             if [ -z "${!name}" ]; then
@@ -53,13 +57,28 @@ jobs:
           done
 
       - name: Resolve season
+        id: season
         env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SEASON_INPUT: ${{ inputs.season }}
         run: |
           season="$SEASON_INPUT"
           if [ -z "$season" ]; then
-            season=$(curl -fsS "$SUPABASE_URL/rest/v1/seasons?select=season&order=season.desc&limit=1" \
-              -H "apikey: $SUPABASE_SECRET_KEY" | jq -er '.[0].season')
+            body=$(mktemp)
+            code=$(curl -sS -o "$body" -w '%{http_code}' \
+              "$SUPABASE_URL/rest/v1/seasons?select=season&order=season.desc&limit=1" \
+              -H "apikey: $SUPABASE_SECRET_KEY") || { echo "::error::could not reach Supabase to read the seasons table"; exit 1; }
+            case "$code" in
+              200) ;;
+              401|403) echo "::error::Supabase answered HTTP $code reading the seasons table: SUPABASE_SECRET_KEY is wrong or not allowed"; exit 1 ;;
+              *) echo "::error::Supabase answered HTTP $code reading the seasons table"; exit 1 ;;
+            esac
+            season=$(jq -r '.[0].season // empty' "$body" 2>/dev/null) || season=""
+            if [ -z "$season" ]; then
+              echo "::error::the seasons table returned no season (empty, null, or unreadable reply); run again with a season input"
+              exit 1
+            fi
           fi
           case "$season" in
             ''|*[!0-9]*) echo "::error::season must be a number, got '$season'"; exit 1 ;;
@@ -67,8 +86,16 @@ jobs:
           echo "SEASON=$season" >> "$GITHUB_ENV"
 
       - name: Refit parameters
+        id: refit
         if: github.event.schedule == env.WEEKLY_REFIT_CRON || inputs.refit
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: python pipeline/fit_params.py --season "$SEASON" --write --if-open --min-new-matches 100
 
       - name: Refresh ratings
+        if: ${{ !cancelled() && steps.secrets.outcome == 'success' && steps.season.outcome == 'success' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: python pipeline/refresh.py run --season "$SEASON"

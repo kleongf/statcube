@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import partial
 from typing import Sequence
 
@@ -261,3 +262,71 @@ def test_dry_run_reads_the_last_run_but_records_nothing(raw_events, tmp_path):
 
     assert code == 1
     assert not (tmp_path / "rows.json").exists()
+
+
+def run_row(matches: int, ts: str) -> dict:
+    return {"season": 2025, "kind": "refresh", "matches": matches, "events": 2, "finished_at": ts}
+
+
+class RunsStore(RecordingStore):
+    def __init__(self, client: FakeClient) -> None:
+        super().__init__()
+        self.runs = store.SupabaseStore(client)
+
+    def last_run(self, season: int, kind: store.RunKind = "refresh") -> store.Run | None:
+        return self.runs.last_run(season, kind)
+
+
+def apply_delete_statement(client: FakeClient, text: str) -> None:
+    match = re.search(r"delete from refresh_runs where season = (\d+) and kind = '(\w+)' and matches > (\d+);", text)
+    assert match, text
+    season, kind, floor = int(match[1]), match[2], int(match[3])
+    client.runs = [r for r in client.runs if not (r["season"] == season and r["kind"] == kind and r["matches"] > floor)]
+
+
+def test_the_refusal_prints_a_delete_statement_that_unblocks_the_next_run_after_several_runs_at_the_high_count(raw_events, capsys):
+    client = FakeClient(runs=[run_row(22, "2026-11-06T06:00:00+00:00"), run_row(22, "2026-11-06T09:00:00+00:00"), run_row(18, "2026-11-05T09:00:00+00:00")])
+    sink = RunsStore(client)
+    assert refresh.main(["run", "--season", "2025"], fetch=fetch_from(FakePost(raw_events)), store=sink) == 1
+    err = capsys.readouterr().err
+    assert "delete from refresh_runs where season = 2025 and kind = 'refresh' and matches > 21;" in err
+
+    apply_delete_statement(client, err)
+
+    assert refresh.main(["run", "--season", "2025"], fetch=fetch_from(FakePost(raw_events)), store=sink) == 0
+    assert [r["matches"] for r in client.runs] == [18]
+
+
+def test_a_failed_refresh_runs_read_exits_1_naming_that_table_not_the_seasons_table(raw_events, capsys):
+    denied = APIError({"message": "permission denied for table refresh_runs", "code": "42501"})
+    sink = RunsStore(FakeClient([denied]))
+
+    code = refresh.main(["run", "--season", "2025"], fetch=fetch_from(FakePost(raw_events)), store=sink)
+
+    assert code == 1
+    assert sink.writes == []
+    assert capsys.readouterr().err.splitlines() == [
+        "error: could not read the last run of season 2025 from the refresh_runs table: " + str(denied),
+    ]
+
+
+def test_a_failed_run_record_is_a_write_failure_that_does_not_echo_the_key():
+    client = FakeClient([RuntimeError("insert refused for key sb_secret_abc")])
+    sut = store.SupabaseStore(client, secret="sb_secret_abc")
+
+    with pytest.raises(store.WriteFailed) as raised:
+        sut.record_run(2025, 30, 3)
+
+    assert "refresh_runs row for season 2025" in str(raised.value)
+    assert "sb_secret_abc" not in str(raised.value)
+
+
+def test_a_failed_run_record_after_the_ratings_were_written_exits_1(raw_events, capsys):
+    class RecordFails(RecordingStore):
+        def record_run(self, season, matches, events, kind="refresh"):
+            raise store.WriteFailed("refresh_runs row for season 2025: boom")
+
+    sink = RecordFails()
+
+    assert refresh.main(["run", "--season", "2025"], fetch=fetch_from(FakePost(raw_events)), store=sink) == 1
+    assert "refresh_runs row for season 2025" in capsys.readouterr().err

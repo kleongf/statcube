@@ -13,7 +13,7 @@ from typing import Callable, Mapping, Sequence
 import epa
 import ftcscout
 from store import (
-    DryRunStore, InvalidEnv, MissingEnv, RatedFewerMatches, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed, redact,
+    DryRunStore, InvalidEnv, MissingEnv, RatedFewerMatches, RunsReadFailed, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed, redact,
 )
 
 Fetch = Callable[[epa.Season], epa.SeasonMatches]
@@ -95,7 +95,7 @@ def main(
         for code, message in sorted(exc.failures.items()):
             fail(f"  {code}: {message}")
         return 1
-    except (SeasonReadFailed, WriteFailed, RatedFewerMatches) as exc:
+    except (SeasonReadFailed, RunsReadFailed, WriteFailed, RatedFewerMatches) as exc:
         fail(f"error: {exc}")
         return 1
     except Exception:

@@ -363,3 +363,60 @@ def test_min_new_matches_ignores_refresh_rows_when_finding_the_last_refit(seeded
 
     assert run_fit_cli(seeded_client, season_4000) == 0
     assert seeded_client.seasons[1] == seasons_row(2025, fit_4000.params)
+
+
+def test_an_unsafe_fit_with_too_few_new_matches_skips_and_exits_0(seeded_client, season_4000, fit_4000, monkeypatch, capsys):
+    seeded_client.runs.append(refit_row(fit_4000.matches))
+    monkeypatch.setattr(fit_params, "MAX_ROUNDS", 1)
+    before = [dict(r) for r in seeded_client.seasons]
+
+    assert run_fit_cli(seeded_client, season_4000) == 0
+    assert seeded_client.seasons == before
+    assert "skipped refit: 0 new matches" in capsys.readouterr().out
+
+
+def test_an_unsafe_fit_with_enough_new_matches_still_refuses(seeded_client, season_4000, monkeypatch, capsys):
+    monkeypatch.setattr(fit_params, "MAX_ROUNDS", 1)
+
+    assert run_fit_cli(seeded_client, season_4000) == 1
+    assert seeded_client.inserts == []
+    assert "refusing to write seasons row 2025" in capsys.readouterr().err
+
+
+def test_a_frozen_null_refit_date_prints_null(seeded_client, capsys):
+    with_refit_until(seeded_client, None)
+
+    code = fit_params.main(["--season", "2025", "--write", "--if-open"], store=store.SupabaseStore(seeded_client), fetch=None, today=date(2026, 11, 30))
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "params_refit_until null" in out
+    assert "None" not in out
+
+
+def test_if_open_compares_the_utc_date_not_the_local_one(seeded_client, season_4000, fit_4000, monkeypatch):
+    instant = datetime(2026, 11, 30, 23, 30, tzinfo=timezone.utc)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return instant.astimezone(tz) if tz else (instant + timedelta(hours=5)).replace(tzinfo=None)
+
+    monkeypatch.setattr(fit_params, "datetime", Clock)
+    with_refit_until(seeded_client, "2026-12-01")
+
+    code = fit_params.main(["--season", "2025", "--write", "--if-open"], store=store.SupabaseStore(seeded_client), fetch=lambda _: season_4000)
+
+    assert code == 0
+    assert seeded_client.seasons[1]["a"] == fit_4000.params.total.a
+
+
+def test_a_refit_that_fails_to_write_the_params_records_no_run(seeded_client, season_4000):
+    class ParamsWriteFails(store.SupabaseStore):
+        def update_season_params(self, season, params):
+            raise store.WriteFailed("seasons row 2025: boom")
+
+    code = fit_params.main(["--season", "2025", "--write", "--min-new-matches", "100"], store=ParamsWriteFails(seeded_client), fetch=lambda _: season_4000)
+
+    assert code == 1
+    assert seeded_client.inserts == []
