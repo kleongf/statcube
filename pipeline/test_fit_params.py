@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import random
 from datetime import date, datetime, timedelta, timezone
-from statistics import fmean
+from statistics import fmean, pstdev
 
 import pytest
 
@@ -45,6 +45,30 @@ def half_mean_alliance_score(data: epa.SeasonMatches, window: fit_params.Window)
     )
 
 
+def z_spread_by_bin(data: epa.SeasonMatches, params: epa.EpaParams, side: str) -> dict[int, tuple[int, float]]:
+    spread: epa.RatingParams = getattr(params, side)
+    zs: dict[int, list[float]] = {}
+
+    def observe(m: epa.Match, red: epa.Prediction, blue: epa.Prediction) -> None:
+        for predicted, alliance in ((getattr(red, side), m.red), (getattr(blue, side), m.blue)):
+            rating = epa.model_rating(predicted)
+            z = (getattr(alliance, side) - predicted) / (spread.a * rating ** spread.p)
+            zs.setdefault(math.floor(math.log(rating) / fit_params.LOG_BIN_WIDTH), []).append(z)
+
+    epa.rate_season(data, params, observe)
+    return {k: (len(v), pstdev(v)) for k, v in zs.items()}
+
+
+@pytest.fixture(scope="module")
+def season_4000() -> epa.SeasonMatches:
+    return synthetic_season(4000)
+
+
+@pytest.fixture(scope="module")
+def fit_4000(season_4000) -> fit_params.Fit:
+    return fit_params.fit_season(season_4000, PRIOR)
+
+
 def test_fit_spread_recovers_a_and_p_from_scores_drawn_with_a_known_spread():
     rng = random.Random(7)
     pairs = []
@@ -52,49 +76,78 @@ def test_fit_spread_recovers_a_and_p_from_scores_drawn_with_a_known_spread():
         predicted = rng.uniform(20, 300)
         pairs.append((predicted, rng.gauss(predicted, 2.0 * predicted ** 0.6)))
 
-    fitted = fit_params.fit_spread(fit_params.bin_residuals(pairs), mean=50)
+    fitted = fit_params.fit_spread(fit_params.full_bins(fit_params.bin_residuals(pairs)), mean=50)
 
     assert fitted.a == pytest.approx(2.0, rel=0.03)
     assert fitted.p == pytest.approx(0.6, rel=0.03)
 
 
-def test_a_season_below_2000_matches_keeps_the_prior_a_and_p_and_refits_only_the_means():
-    data = synthetic_season(1500)
+def test_fit_spread_weights_each_bin_by_its_alliance_count():
+    on_curve = [fit_params.Bin(i, math.exp(3 + i / 10), 1000, 2.0 * math.exp(3 + i / 10) ** 0.6) for i in range(6)]
+    sparse_outliers = [fit_params.Bin(6 + i, math.exp(3.6 + i / 10), 50, 3.0 * math.exp(3.6 + i / 10) ** 0.6) for i in range(2)]
+
+    fitted = fit_params.fit_spread(on_curve + sparse_outliers, mean=50)
+
+    assert fitted.p == pytest.approx(0.6, abs=0.15)
+
+
+def test_a_prediction_below_1_bins_at_rating_1_with_its_residual_measured_from_the_prediction():
+    bins = fit_params.bin_residuals([(0.2, 0.2), (0.8, 0.8)])
+
+    assert [b.rating for b in bins] == [1.0, 1.0]
+    assert [b.std for b in bins] == [0.0, 0.0]
+
+
+def test_ratings_moving_across_a_bin_edge_move_the_bin_counts_only_slightly():
+    before = {b.index: b.alliances for b in fit_params.bin_residuals([(math.exp(3.099), 1.0)] * 100)}
+    after = {b.index: b.alliances for b in fit_params.bin_residuals([(math.exp(3.101), 1.0)] * 100)}
+
+    assert before.keys() == after.keys()
+    for index in before:
+        assert after[index] == pytest.approx(before[index], abs=3)
+
+
+def test_a_season_whose_bins_pass_the_gate_refits_a_and_p_however_few_matches_it_has():
+    fit = fit_params.fit_season(synthetic_season(1500), PRIOR)
+
+    assert fit.matches == 1500
+    assert fit.outcome is fit_params.Outcome.CONVERGED
+    assert (fit.params.total.a, fit.params.total.p) != (PRIOR.total.a, PRIOR.total.p)
+
+
+def test_too_few_full_rating_bins_keeps_the_prior_a_and_p_and_refits_only_the_means():
+    data = synthetic_season(2500, a=0.3, strength=(30, 32))
 
     fit = fit_params.fit_season(data, PRIOR)
 
     mean, mean_auto = half_mean_alliance_score(data, fit_params.Window())
-    assert fit.matches == 1500
-    assert not fit.refit_spread
+    assert len(fit_params.full_bins(fit.total_bins)) < fit_params.MIN_BINS
+    assert fit.outcome is fit_params.Outcome.KEPT_PRIOR_SPREAD
     assert fit.params == epa.EpaParams(
         epa.RatingParams(round(mean, 4), PRIOR.total.a, PRIOR.total.p),
         epa.RatingParams(round(mean_auto, 4), PRIOR.auto.a, PRIOR.auto.p),
     )
 
 
-def test_enough_matches_in_too_few_full_rating_bins_still_keeps_the_prior_a_and_p():
-    data = synthetic_season(2500, a=0.3, strength=(30, 32))
+def test_the_fit_converges_to_a_fixed_point_that_refitting_does_not_move(season_4000, fit_4000):
+    again = fit_params.fit_season(season_4000, fit_4000.params)
 
-    fit = fit_params.fit_season(data, PRIOR)
+    assert fit_4000.outcome is fit_params.Outcome.CONVERGED
+    assert fit_4000.move <= 0.001
+    assert again.outcome is fit_params.Outcome.CONVERGED
+    assert again.rounds == 1
+    for first, second in ((fit_4000.params.total, again.params.total), (fit_4000.params.auto, again.params.auto)):
+        assert second.a == pytest.approx(first.a, rel=0.001)
+        assert second.p == pytest.approx(first.p, rel=0.001)
 
-    assert fit.matches == 2500
-    assert len(fit_params.full_bins(fit.total_bins)) < fit_params.MIN_BINS
-    assert not fit.refit_spread
-    assert (fit.params.total.a, fit.params.total.p) == (PRIOR.total.a, PRIOR.total.p)
 
+@pytest.mark.parametrize("side", ["total", "auto"])
+def test_the_fitted_spread_matches_the_spread_of_the_residuals_in_every_well_filled_bin(season_4000, fit_4000, side):
+    spreads = z_spread_by_bin(season_4000, fit_4000.params, side)
 
-def test_a_season_with_enough_data_refits_a_and_p_to_a_fixed_point():
-    data = synthetic_season(4000)
-
-    fit = fit_params.fit_season(data, PRIOR)
-    again = fit_params.fit_season(data, fit.params)
-
-    assert fit.refit_spread
-    assert 1 <= fit.rounds <= fit_params.MAX_ROUNDS
-    for first, second in ((fit.params.total, again.params.total), (fit.params.auto, again.params.auto)):
-        assert math.isfinite(first.a) and first.a > 0 and first.p > 0
-        assert second.a == pytest.approx(first.a, rel=0.005)
-        assert second.p == pytest.approx(first.p, rel=0.005)
+    well_filled = {k: sd for k, (n, sd) in spreads.items() if n >= 300}
+    assert len(well_filled) >= 6
+    assert all(sd == pytest.approx(1, abs=0.06) for sd in well_filled.values()), well_filled
 
 
 def test_only_matches_inside_the_window_count_toward_the_means_and_the_match_count():
@@ -115,18 +168,24 @@ def test_a_window_with_no_matches_raises_no_matches():
         fit_params.fit_season(synthetic_season(100), PRIOR, fit_params.Window(date(2026, 3, 1), date(2026, 3, 14)))
 
 
-def test_scan_december_ranks_the_window_that_reproduces_the_seeded_row_first():
-    data = synthetic_season(4000)
-    target = fit_params.Window(date(2025, 12, 3), date(2025, 12, 16))
-    seeded = fit_params.fit_season(data, PRIOR, target).params
+def fit_with(**changes: float) -> fit_params.Fit:
+    total = {"mean": 50.0, "a": 2.0, "p": 0.6} | {k: v for k, v in changes.items() if not k.endswith("_auto")}
+    auto = {"mean": 10.0, "a": 2.0, "p": 0.6} | {k.removesuffix("_auto"): v for k, v in changes.items() if k.endswith("_auto")}
+    params = epa.EpaParams(epa.RatingParams(**total), epa.RatingParams(**auto))
+    return fit_params.Fit(params, 3000, (), (), fit_params.Outcome.CONVERGED, rounds=3, move=0.0)
 
-    scanned = fit_params.scan_december(data, PRIOR, seeded, 2025)
 
-    assert scanned[0].window == target
-    assert scanned[0].error == 0
-    refits = [row.fit.refit_spread for row in scanned]
-    assert False in refits
-    assert refits == sorted(refits, reverse=True)
+@pytest.mark.parametrize("changes", [
+    {"a": 0.0}, {"a_auto": -1.0}, {"p": 0.0}, {"p_auto": 1.5}, {"p": 2.0},
+    {"mean": math.nan}, {"a_auto": math.inf}, {"mean_auto": 0.0},
+])
+def test_refusal_rejects_values_the_rating_model_cannot_use(changes):
+    assert fit_params.refusal(fit_with(**changes)) is not None
+
+
+def test_refusal_accepts_a_converged_fit_with_sane_values(fit_4000):
+    assert fit_params.refusal(fit_with()) is None
+    assert fit_params.refusal(fit_4000) is None
 
 
 def seasons_row(season: int, params: epa.EpaParams) -> dict:
@@ -149,26 +208,48 @@ def seeded_client() -> FakeClient:
 def test_cli_without_write_prints_the_counts_and_values_and_leaves_the_row_alone(seeded_client, capsys):
     before = [dict(r) for r in seeded_client.seasons]
 
-    code = cli(seeded_client, synthetic_season(1500))
+    code = cli(seeded_client, synthetic_season(2500, a=0.3, strength=(30, 32)))
 
     out = capsys.readouterr().out
     assert code == 0
     assert seeded_client.seasons == before
-    assert "rated matches 1500" in out
+    assert "rated matches 2500" in out
+    assert "bins have >= 50 alliances" in out
     assert "kept season 2024's a and p" in out
     assert "dry run" in out
 
 
-def test_cli_write_twice_leaves_the_same_row_as_writing_once(seeded_client):
-    data = synthetic_season(4000)
-
-    assert cli(seeded_client, data, "--write") == 0
+def test_cli_write_twice_leaves_the_same_rounded_row_as_writing_once(seeded_client, season_4000, fit_4000):
+    assert cli(seeded_client, season_4000, "--write") == 0
     once = dict(seeded_client.seasons[1])
-    assert cli(seeded_client, data, "--write") == 0
+    assert cli(seeded_client, season_4000, "--write") == 0
 
-    fit = fit_params.fit_season(data, PRIOR)
-    assert seeded_client.seasons[1] == once == seasons_row(2025, fit.params)
+    assert seeded_client.seasons[1] == once == seasons_row(2025, fit_4000.params)
     assert seeded_client.seasons[0] == seasons_row(2024, PRIOR)
+    written = [once[name] for name in fit_params.NAMES]
+    assert written == [round(v, 4) for v in written]
+
+
+def test_cli_write_refuses_a_fit_stopped_by_the_round_cap(seeded_client, season_4000, monkeypatch, capsys):
+    before = [dict(r) for r in seeded_client.seasons]
+    monkeypatch.setattr(fit_params, "MAX_ROUNDS", 1)
+
+    code = cli(seeded_client, season_4000, "--write")
+
+    assert code == 1
+    assert seeded_client.seasons == before
+    assert "round cap" in capsys.readouterr().err
+
+
+def test_cli_write_refuses_values_the_rating_model_cannot_use(seeded_client, monkeypatch, capsys):
+    before = [dict(r) for r in seeded_client.seasons]
+    monkeypatch.setattr(fit_params, "fit_season", lambda *_: fit_with(p=2.0))
+
+    code = cli(seeded_client, synthetic_season(100), "--write")
+
+    assert code == 1
+    assert seeded_client.seasons == before
+    assert "refusing to write seasons row 2025" in capsys.readouterr().err
 
 
 def test_cli_exits_1_and_writes_nothing_for_a_window_with_no_matches(seeded_client, capsys):
@@ -181,20 +262,14 @@ def test_cli_exits_1_and_writes_nothing_for_a_window_with_no_matches(seeded_clie
     assert "no rated matches" in capsys.readouterr().err
 
 
-def test_cli_write_for_a_season_without_a_row_exits_2_naming_it(capsys):
+def test_cli_write_for_a_season_without_a_row_exits_2_before_fetching(capsys):
     client = FakeClient(seasons=[seasons_row(2024, PRIOR)])
 
-    code = cli(client, synthetic_season(100), "--write")
+    def fetch(_: epa.Season) -> epa.SeasonMatches:
+        raise AssertionError("fetched a season that has no row to write")
+
+    code = fit_params.main(["--season", "2025", "--write"], store=store.SupabaseStore(client), fetch=fetch)
 
     assert code == 2
     assert client.seasons == [seasons_row(2024, PRIOR)]
     assert "season 2025" in capsys.readouterr().err
-
-
-def test_cli_scan_december_prints_the_best_window_and_its_largest_error(seeded_client, capsys):
-    code = cli(seeded_client, synthetic_season(3000), "--scan-december")
-
-    out = capsys.readouterr().out
-    assert code == 0
-    assert "best window 2025-12-" in out
-    assert "relative errors mean=" in out

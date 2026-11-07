@@ -7,35 +7,29 @@ import os
 import sys
 import traceback
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
+from enum import Enum, auto
 from functools import partial
-from statistics import fmean, pstdev
-from typing import Callable, Mapping, NamedTuple, Protocol, Sequence
+from statistics import fmean
+from typing import Callable, Mapping, Sequence
 
 import epa
 import ftcscout
-from store import InvalidEnv, MissingEnv, SeasonReadFailed, SupabaseStore, UnknownSeason, WriteFailed, redact
+from store import InvalidEnv, MissingEnv, SeasonReadFailed, Store, SupabaseStore, UnknownSeason, WriteFailed, redact
 
-MIN_MATCHES = 2000
 MIN_BINS = 6
 MIN_BIN_ALLIANCES = 50
 LOG_BIN_WIDTH = 0.1
 TOLERANCE = 0.001
 MAX_ROUNDS = 10
-SCAN_DAYS = 14
 DECIMALS = 4
+MAX_P = 1.5
 
 Fetch = Callable[[epa.Season], epa.SeasonMatches]
 
 
 class NoMatches(Exception):
     pass
-
-
-class ParamStore(Protocol):
-    def season(self, number: int) -> epa.Season: ...
-
-    def update_season_params(self, season: int, params: epa.EpaParams) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -52,9 +46,16 @@ class Window:
 
 @dataclass(frozen=True)
 class Bin:
+    index: int
     rating: float
-    alliances: int
+    alliances: float
     std: float
+
+
+class Outcome(Enum):
+    KEPT_PRIOR_SPREAD = auto()
+    CONVERGED = auto()
+    HIT_CAP = auto()
 
 
 @dataclass(frozen=True)
@@ -63,9 +64,9 @@ class Fit:
     matches: int
     total_bins: tuple[Bin, ...]
     auto_bins: tuple[Bin, ...]
-    refit_spread: bool
+    outcome: Outcome
     rounds: int
-    converged: bool
+    move: float
 
 
 NAMES = ("mean", "a", "p", "mean_auto", "a_auto", "p_auto")
@@ -75,23 +76,30 @@ def values(params: epa.EpaParams) -> tuple[float, float, float, float, float, fl
     return params.total.mean, params.total.a, params.total.p, params.auto.mean, params.auto.a, params.auto.p
 
 
-def relative_errors(fitted: epa.EpaParams, seeded: epa.EpaParams) -> tuple[float, ...]:
-    return tuple((f - s) / abs(s) for f, s in zip(values(fitted), values(seeded)))
-
-
-def largest_relative_error(fitted: epa.EpaParams, seeded: epa.EpaParams) -> float:
-    return max(map(abs, relative_errors(fitted, seeded)))
-
-
 def bin_residuals(pairs: Sequence[tuple[float, float]]) -> tuple[Bin, ...]:
-    groups: dict[int, list[tuple[float, float]]] = {}
+    """Each alliance splits its weight between the two bins whose centres bracket its log rating.
+
+    A small change in a rating then moves the bin statistics a little instead of moving the whole alliance into the
+    next bin, so a replay with nearly equal a and p gives nearly equal bins and the fixed-point loop can settle.
+    """
+    groups: dict[int, list[tuple[float, float, float]]] = {}
     for predicted, actual in pairs:
         rating = epa.model_rating(predicted)
-        groups.setdefault(math.floor(math.log(rating) / LOG_BIN_WIDTH), []).append((rating, actual - predicted))
-    return tuple(
-        Bin(fmean(r for r, _ in group), len(group), pstdev(e for _, e in group))
-        for _, group in sorted(groups.items())
-    )
+        position = math.log(rating) / LOG_BIN_WIDTH - 0.5
+        below = math.floor(position)
+        share = position - below
+        for index, weight in ((below, 1 - share), (below + 1, share)):
+            if weight > 0:
+                groups.setdefault(index, []).append((weight, rating, actual - predicted))
+    return tuple(_weighted_bin(index, group) for index, group in sorted(groups.items()))
+
+
+def _weighted_bin(index: int, group: Sequence[tuple[float, float, float]]) -> Bin:
+    weights = [w for w, _, _ in group]
+    residuals = [e for _, _, e in group]
+    centre = fmean(residuals, weights)
+    spread = fmean([(e - centre) ** 2 for e in residuals], weights)
+    return Bin(index, fmean([r for _, r, _ in group], weights), sum(weights), math.sqrt(spread))
 
 
 def full_bins(bins: Sequence[Bin]) -> list[Bin]:
@@ -99,7 +107,7 @@ def full_bins(bins: Sequence[Bin]) -> list[Bin]:
 
 
 def fit_spread(bins: Sequence[Bin], mean: float) -> epa.RatingParams:
-    usable = full_bins(bins)
+    usable = [b for b in bins if b.std > 0]
     weights = [b.alliances for b in usable]
     xs = [math.log(b.rating) for b in usable]
     ys = [math.log(b.std) for b in usable]
@@ -123,8 +131,8 @@ def _replay(
     return len(total) // 2, bin_residuals(total), bin_residuals(auto)
 
 
-def _moved(old: epa.RatingParams, new: epa.RatingParams) -> bool:
-    return abs(new.a - old.a) > TOLERANCE * abs(old.a) or abs(new.p - old.p) > TOLERANCE * abs(old.p)
+def _move(old: epa.RatingParams, new: epa.RatingParams) -> float:
+    return max(abs(new.a - old.a) / abs(old.a), abs(new.p - old.p) / abs(old.p))
 
 
 def _rounded(params: epa.EpaParams) -> epa.EpaParams:
@@ -135,6 +143,11 @@ def _rounded(params: epa.EpaParams) -> epa.EpaParams:
 
 
 def fit_season(data: epa.SeasonMatches, prior: epa.EpaParams, window: Window = Window()) -> Fit:
+    """The full bins are chosen once, from the replay with the prior's a and p, and held through every round.
+
+    Choosing them each round let a bin near MIN_BIN_ALLIANCES drop in and out, and the full 2025 season alternated
+    between two fits forever.
+    """
     rated = [m for m in epa.order_matches(data.matches) if m.posted_at.date() in window]
     if not rated:
         raise NoMatches(f"no rated matches in {window}")
@@ -149,45 +162,37 @@ def fit_season(data: epa.SeasonMatches, prior: epa.EpaParams, window: Window = W
         epa.RatingParams(mean_auto, prior.auto.a, prior.auto.p),
     )
     matches, total_bins, auto_bins = _replay(history, params, window)
-    if matches < MIN_MATCHES or min(len(full_bins(total_bins)), len(full_bins(auto_bins))) < MIN_BINS:
-        return Fit(_rounded(params), matches, total_bins, auto_bins, refit_spread=False, rounds=0, converged=False)
+    held_total = {b.index for b in full_bins(total_bins)}
+    held_auto = {b.index for b in full_bins(auto_bins)}
+    if min(len(held_total), len(held_auto)) < MIN_BINS:
+        return Fit(_rounded(params), matches, total_bins, auto_bins, Outcome.KEPT_PRIOR_SPREAD, rounds=0, move=0.0)
 
     for rounds in range(1, MAX_ROUNDS + 1):
-        fitted = epa.EpaParams(fit_spread(total_bins, mean), fit_spread(auto_bins, mean_auto))
-        moved = _moved(params.total, fitted.total) or _moved(params.auto, fitted.auto)
+        fitted = epa.EpaParams(
+            fit_spread([b for b in total_bins if b.index in held_total], mean),
+            fit_spread([b for b in auto_bins if b.index in held_auto], mean_auto),
+        )
+        move = max(_move(params.total, fitted.total), _move(params.auto, fitted.auto))
         params = fitted
-        if not moved or rounds == MAX_ROUNDS:
-            break
-        matches, total_bins, auto_bins = _replay(history, params, window)
-    return Fit(_rounded(params), matches, total_bins, auto_bins, refit_spread=True, rounds=rounds, converged=not moved)
+        if move <= TOLERANCE:
+            return Fit(_rounded(params), matches, total_bins, auto_bins, Outcome.CONVERGED, rounds, move)
+        if rounds < MAX_ROUNDS:
+            matches, total_bins, auto_bins = _replay(history, params, window)
+    return Fit(_rounded(params), matches, total_bins, auto_bins, Outcome.HIT_CAP, MAX_ROUNDS, move)
 
 
-class ScanRow(NamedTuple):
-    window: Window
-    fit: Fit
-    error: float
-
-    @property
-    def rank(self) -> tuple[bool, float]:
-        return not self.fit.refit_spread, self.error
-
-
-def december_windows(year: int) -> list[Window]:
-    first = date(year, 12, 1)
-    return [Window(first + timedelta(days=d), first + timedelta(days=d + SCAN_DAYS - 1)) for d in range(31)]
-
-
-def scan_december(
-    data: epa.SeasonMatches, prior: epa.EpaParams, seeded: epa.EpaParams, year: int,
-) -> list[ScanRow]:
-    scanned = []
-    for window in december_windows(year):
-        try:
-            fit = fit_season(data, prior, window)
-        except NoMatches:
-            continue
-        scanned.append(ScanRow(window, fit, largest_relative_error(fit.params, seeded)))
-    return sorted(scanned, key=lambda row: row.rank)
+def refusal(fit: Fit) -> str | None:
+    if fit.outcome is Outcome.HIT_CAP:
+        return f"a or p still moved {fit.move:.3%} after the {MAX_ROUNDS}-round cap, so the fit is not a fixed point"
+    for name, value in zip(NAMES, values(fit.params)):
+        if not math.isfinite(value):
+            return f"{name} is {value}"
+    for side in (fit.params.total, fit.params.auto):
+        if side.mean <= 0 or side.a <= 0:
+            return f"mean and a must be positive, got {side}"
+        if not 0 < side.p < MAX_P:
+            return f"p must be in (0, {MAX_P}), got {side}"
+    return None
 
 
 def _format_params(params: epa.EpaParams) -> str:
@@ -196,20 +201,20 @@ def _format_params(params: epa.EpaParams) -> str:
 
 def _format_bins(bins: Sequence[Bin]) -> str:
     full = len(full_bins(bins))
-    counts = " ".join(f"{b.rating:.3g}:{b.alliances}" for b in bins)
+    counts = " ".join(f"{b.rating:.3g}:{b.alliances:.0f}" for b in bins)
     return f"{full} of {len(bins)} bins have >= {MIN_BIN_ALLIANCES} alliances (need {MIN_BINS}); rating:alliances {counts}"
 
 
 def report(season: int, window: Window, fit: Fit, prior_season: int) -> str:
-    if fit.converged:
-        verdict = f"refit a and p (fixed point after {fit.rounds} round(s))"
-    elif fit.refit_spread:
-        verdict = f"refit a and p (stopped at the {MAX_ROUNDS}-round cap; a or p still moved more than {TOLERANCE:.1%})"
-    else:
+    if fit.outcome is Outcome.KEPT_PRIOR_SPREAD:
         verdict = f"kept season {prior_season}'s a and p; refit only mean and mean_auto"
+    elif fit.outcome is Outcome.CONVERGED:
+        verdict = f"refit a and p (fixed point after {fit.rounds} round(s); last round moved {fit.move:.3%})"
+    else:
+        verdict = f"refit a and p but stopped at the {MAX_ROUNDS}-round cap; last round moved {fit.move:.3%}"
     return "\n".join((
         f"season {season} window {window}",
-        f"rated matches {fit.matches} (need {MIN_MATCHES} to refit a and p)",
+        f"rated matches {fit.matches}",
         f"total: {_format_bins(fit.total_bins)}",
         f"auto: {_format_bins(fit.auto_bins)}",
         verdict,
@@ -217,7 +222,7 @@ def report(season: int, window: Window, fit: Fit, prior_season: int) -> str:
     ))
 
 
-def _prior(store: ParamStore, season: int) -> epa.Season:
+def _prior(store: Store, season: int) -> epa.Season:
     try:
         return store.season(season - 1)
     except UnknownSeason:
@@ -229,12 +234,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--season", type=int, required=True)
     parser.add_argument("--from", dest="start", type=date.fromisoformat, metavar="DATE")
     parser.add_argument("--to", dest="end", type=date.fromisoformat, metavar="DATE")
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--write", action="store_true", help="write the fitted values to the season's seasons row")
-    mode.add_argument(
-        "--scan-december", action="store_true",
-        help="fit every 14-day window starting in December and print the one closest to the seeded row",
-    )
+    parser.add_argument("--write", action="store_true", help="write the fitted values to the season's seasons row")
     return parser
 
 
@@ -243,7 +243,7 @@ def main(
     *,
     env: Mapping[str, str] = os.environ,
     fetch: Fetch | None = None,
-    store: ParamStore | None = None,
+    store: Store | None = None,
 ) -> int:
     args = _parser().parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
@@ -256,30 +256,21 @@ def main(
     try:
         store = store or SupabaseStore.from_env(env)
         fetch = fetch or partial(ftcscout.fetch_season, post=ftcscout.http_post(env.get("FTCSCOUT_GRAPHQL_URL", ftcscout.DEFAULT_URL)))
+        if args.write:
+            store.season(args.season)
         prior = _prior(store, args.season)
         data = fetch(epa.Season(args.season, prior.params))
-        if args.scan_december:
-            seeded = store.season(args.season).params
-            scanned = scan_december(data, prior.params, seeded, args.season)
-            if not scanned:
-                raise NoMatches(f"no rated matches in any December {args.season} window")
-            for window, fit, error in reversed(scanned):
-                print(f"window {window} matches={fit.matches} refit_spread={fit.refit_spread} largest_error={error:.1%} {_format_params(fit.params)}")
-            window, fit, error = scanned[0]
-            if not fit.refit_spread:
-                print(f"no December window passed the data gate; the closest kept season {prior.number}'s a and p")
-            print(f"best window {window} largest relative error {error:.1%}")
-            print("relative errors " + " ".join(f"{n}={e:+.1%}" for n, e in zip(NAMES, relative_errors(fit.params, seeded))))
-            print(report(args.season, window, fit, prior.number))
-            return 0
         window = Window(args.start, args.end)
         fit = fit_season(data, prior.params, window)
         print(report(args.season, window, fit, prior.number))
-        if args.write:
-            store.update_season_params(args.season, fit.params)
-            print(f"wrote seasons row {args.season}")
-        else:
+        if not args.write:
             print("dry run; pass --write to update the seasons row")
+            return 0
+        if reason := refusal(fit):
+            fail(f"error: refusing to write seasons row {args.season}: {reason}")
+            return 1
+        store.update_season_params(args.season, fit.params)
+        print(f"wrote seasons row {args.season}")
     except (MissingEnv, InvalidEnv, UnknownSeason) as exc:
         fail(f"error: {exc}")
         return 2
