@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from statistics import NormalDist
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 _NORMAL = NormalDist()
 
@@ -70,6 +70,17 @@ class SeasonMatches:
     names: Mapping[int, str]
     events: int
     skipped: int
+
+
+@dataclass(frozen=True)
+class Prediction:
+
+    total: float
+    auto: float
+
+
+Observer = Callable[[Match, Prediction, Prediction], None]
+"""Receives each rated match with the red and blue predictions made before it was played."""
 
 
 @dataclass(frozen=True)
@@ -170,13 +181,15 @@ def _competition_ranks(values: Mapping[int, float]) -> dict[int, int]:
     return {team: 1 + n - bisect_right(ascending, v) for team, v in values.items()}
 
 
-def rate_season(data: SeasonMatches, params: EpaParams) -> list[TeamRow]:
+def rate_season(data: SeasonMatches, params: EpaParams, observe: Observer | None = None) -> list[TeamRow]:
     states: defaultdict[int, _TeamState] = defaultdict(lambda: _TeamState(params))
 
     for m in order_matches(data.matches):
         r1, r2 = (states[t] for t in m.red.teams)
         b1, b2 = (states[t] for t in m.blue.teams)
         four = (r1, r2, b1, b2)
+        if observe is not None:
+            observe(m, Prediction(r1.total + r2.total, r1.auto + r2.auto), Prediction(b1.total + b2.total, b1.auto + b2.auto))
 
         total = calculate_epa_update(
             r1.total, r2.total, b1.total, b2.total,

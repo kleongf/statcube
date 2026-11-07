@@ -109,3 +109,20 @@ def test_same_second_matches_are_ordered_by_event_code_then_teams():
 )
 def test_k_factor_schedule(n, expected):
     assert epa.calculate_k_factor(n, 40.0, 20.0) == pytest.approx(expected)
+
+
+def test_observer_sees_each_deduplicated_match_once_with_the_ratings_from_before_it():
+    first = match(alliance(1, 2, 120, 30), alliance(3, 4, 80, 10), minute=0)
+    second = match(alliance(1, 3, 90, 25), alliance(2, 4, 100, 15), minute=5)
+    listed_twice = epa.Match("OTHER", second.posted_at, second.posted_key, second.red, second.blue)
+    seen: list[tuple[epa.Match, epa.Prediction, epa.Prediction]] = []
+
+    rows = epa.rate_season(epa.SeasonMatches((first, second, listed_twice), {}, 2, 0), PARAMS, lambda *call: seen.append(call))
+
+    after_first = {r.team_number: r.history[0] for r in rows}
+    start = epa.Prediction(2 * PARAMS.total.mean, 2 * PARAMS.auto.mean)
+    assert [m for m, _, _ in seen] == [first, second]
+    assert seen[0][1:] == (start, start)
+    for prediction, (a, b) in zip(seen[1][1:], ((1, 3), (2, 4))):
+        expected = (after_first[a].epa + after_first[b].epa, after_first[a].auto_epa + after_first[b].auto_epa)
+        assert (prediction.total, prediction.auto) == pytest.approx(expected, abs=1e-3)
