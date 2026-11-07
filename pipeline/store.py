@@ -56,6 +56,8 @@ class WriteFailed(Exception):
 class Store(Protocol):
     def season(self, number: int) -> Season: ...
 
+    def update_season_params(self, season: int, params: EpaParams) -> None: ...
+
     def write_ratings(self, season: int, rows: Sequence[TeamRow]) -> None: ...
 
 
@@ -192,9 +194,15 @@ class DryRunStore:
     def __init__(self, path: Path, read: Callable[[int], Season]) -> None:
         self._path = path
         self._read = read
+        self.season_params: dict[int, EpaParams] = {}
 
     def season(self, number: int) -> Season:
         return self._read(number)
+
+    def update_season_params(self, season: int, params: EpaParams) -> None:
+        self._read(season)
+        self.season_params[season] = params
+        logger.info("dry run: would write seasons row %d: %s", season, params)
 
     def write_ratings(self, season: int, rows: Sequence[TeamRow]) -> None:
         records = [to_record(r) for r in sorted(rows, key=lambda r: r.team_number)]

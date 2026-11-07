@@ -58,6 +58,15 @@ def test_season_without_a_row_raises_unknown_season_naming_it():
         sut.season(2026)
 
 
+def test_update_season_params_without_a_row_raises_unknown_season_naming_it():
+    client = FakeClient(seasons=[dict(SEASON_ROW, season=2024)])
+    sut, _ = make_store(client)
+
+    with pytest.raises(store.UnknownSeason, match="2026"):
+        sut.update_season_params(2026, SEASON_2025.params)
+    assert client.seasons == [dict(SEASON_ROW, season=2024)]
+
+
 @pytest.mark.parametrize(
     "failure",
     [
@@ -216,6 +225,17 @@ def test_dry_run_store_writes_the_records_the_upsert_would_send(tmp_path):
     written = json.loads(path.read_text())
     assert [r["team_number"] for r in written] == [1, 2]
     assert written[0] == store.to_record(team_row(1))
+
+
+def test_dry_run_store_records_the_params_write_without_sending_it(tmp_path):
+    sut = store.DryRunStore(tmp_path / "rows.json", read_seasons)
+
+    sut.update_season_params(2025, SEASON_2025.params)
+
+    assert sut.season_params == {2025: SEASON_2025.params}
+    assert not (tmp_path / "rows.json").exists()
+    with pytest.raises(store.UnknownSeason, match="2019"):
+        sut.update_season_params(2019, SEASON_2025.params)
 
 
 def test_dry_run_store_serves_seasons_from_its_reader(tmp_path):
