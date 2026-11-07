@@ -82,8 +82,8 @@ query GetEventMatches($eventByCodeSeason: Int!, $eventByCodeCode: String!) {{
 """
 
 
-def _alliance(raw_teams: list[Mapping[str, Any]], colour: str, scores: Mapping[str, Any] | None) -> Alliance | None:
-    teams = tuple(t["teamNumber"] for t in raw_teams if t.get("onField") and t.get("alliance") == colour)
+def _alliance(fielded: list[Mapping[str, Any]], colour: str, scores: Mapping[str, Any] | None) -> Alliance | None:
+    teams = tuple(t["teamNumber"] for t in fielded if t.get("alliance") == colour)
     side = (scores or {}).get(colour.lower()) or {}
     total, auto = side.get("totalPoints"), side.get("autoPoints")
     if len(teams) != 2 or total is None or auto is None:
@@ -99,15 +99,17 @@ def parse_event(event_code: str, raw_matches: list[Mapping[str, Any]]) -> tuple[
         if not (raw.get("hasBeenPlayed") and raw.get("postResultTime")):
             continue
         raw_teams = raw.get("teams") or []
+        # Some events (2026 KZASN1) mark every team onField=false; then the listed teams played.
+        fielded = [t for t in raw_teams if t.get("onField")] or raw_teams
         scores = raw.get("scores")
-        red = _alliance(raw_teams, "Red", scores)
-        blue = _alliance(raw_teams, "Blue", scores)
+        red = _alliance(fielded, "Red", scores)
+        blue = _alliance(fielded, "Blue", scores)
         if red is None or blue is None or len({*red.teams, *blue.teams}) < 4:
             skipped += 1
             continue
-        for t in raw_teams:
+        for t in fielded:
             name = (t.get("team") or {}).get("name")
-            if t.get("onField") and name:
+            if name:
                 names.setdefault(t["teamNumber"], name)
         matches.append(Match(
             event_code=event_code,
